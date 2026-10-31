@@ -7,6 +7,14 @@ export interface ToolConfig {
   pg_restore?: string;
 }
 
+export interface ServiceConfig {
+  backup_interval_seconds: number;
+  heartbeat_interval_seconds: number;
+  run_on_start: boolean;
+  listen_address: '127.0.0.1' | '0.0.0.0';
+  port: number;
+}
+
 export interface CommonSourceConfig {
   id: string;
   required: boolean;
@@ -53,8 +61,31 @@ export interface BackupConfig {
   state_directory: string;
   staging_directory: string;
   tools?: ToolConfig;
+  service?: ServiceConfig;
   sources: SourceConfig[];
   targets: TargetConfig[];
+}
+
+export type ServiceState = 'STARTING' | 'READY' | 'RUNNING' | 'DEGRADED' | 'STOPPING';
+
+export interface Heartbeat {
+  schema: 'isy.backup.heartbeat/v1';
+  deployment: string;
+  environment: string;
+  sequence: number;
+  runtime_instance_id: string;
+  observed_at: string;
+  config_sha256: string;
+  image: ImageIdentity;
+  state: ServiceState;
+  scheduler_responsive: boolean;
+  current_operation_id: string | null;
+  next_backup_at: string | null;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_required_success_at: string | null;
+  target_freshness: Record<string, string>;
+  finding_codes: string[];
 }
 
 export interface Finding {

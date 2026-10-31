@@ -1,8 +1,8 @@
 services:
   backup:
     # Replace this evaluation tag with the qualified immutable GHCR digest.
-    image: ghcr.io/goldenisy/isy-backup-agent:0.1.0
-    command: ["backup", "--config", "/etc/isy-backup/config.yml"]
+    image: ghcr.io/goldenisy/isy-backup-agent:0.2.0
+    command: ["serve", "--config", "/etc/isy-backup/config.yml"]
     environment:
       # Must match the immutable image reference selected for this deployment.
       ISY_BACKUP_IMAGE_DIGEST: ${ISY_BACKUP_IMAGE_DIGEST:?set qualified image digest}
@@ -11,6 +11,12 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "/app/dist/cli/main.js", "status", "--healthcheck", "--config", "/etc/isy-backup/config.yml"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
     volumes:
@@ -20,7 +26,7 @@ services:
       - backup-state:/var/lib/isy-backup
       - backup-cache:/var/cache/isy-backup
       - /absolute/source/path:/data/application:ro
-    restart: "no"
+    restart: unless-stopped
 
 volumes:
   backup-state:

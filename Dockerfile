@@ -14,7 +14,7 @@ RUN npm test && npm prune --omit=dev
 
 FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d48494586f60ffce1fc708e0e AS runtime
 
-ARG IMAGE_VERSION=0.1.0
+ARG IMAGE_VERSION=0.2.0
 ARG SOURCE_REVISION=development
 ARG RESTIC_VERSION=0.14.0-1+b5
 ARG RCLONE_VERSION=1.60.1+dfsg-2+b5
@@ -40,5 +40,7 @@ ENV NODE_ENV=production \
     ISY_BACKUP_VERSION=${IMAGE_VERSION} \
     ISY_BACKUP_SOURCE_REVISION=${SOURCE_REVISION}
 USER 1000:1000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["node", "/app/dist/cli/main.js", "status", "--healthcheck", "--config", "/etc/isy-backup/config.yml"]
 ENTRYPOINT ["node", "/app/dist/cli/main.js"]
-CMD ["version"]
+CMD ["serve", "--config", "/etc/isy-backup/config.yml"]

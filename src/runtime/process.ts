@@ -2,6 +2,15 @@ import { spawn } from 'node:child_process';
 import { BackupError } from '../domain/errors.js';
 
 const MAX_OUTPUT = 64 * 1024;
+const activeChildren = new Set<ReturnType<typeof spawn>>();
+
+export function terminateActiveCommands(): void {
+  for (const child of activeChildren) {
+    child.kill('SIGTERM');
+    const timer = setTimeout(() => child.kill('SIGKILL'), 2_000);
+    timer.unref();
+  }
+}
 
 export interface CommandResult {
   stdout: string;
@@ -29,6 +38,7 @@ export async function runCommand(command: string, args: readonly string[], optio
   };
   return await new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { env: environment, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    activeChildren.add(child);
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     let timedOut = false;
@@ -41,10 +51,12 @@ export async function runCommand(command: string, args: readonly string[], optio
     child.stdout.on('data', (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
     child.stderr.on('data', (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
     child.once('error', (error) => {
+      activeChildren.delete(child);
       clearTimeout(timer);
       reject(new BackupError('DEPENDENCY_UNAVAILABLE', 3, `cannot execute ${command}: ${error.message}`, 'preflight'));
     });
     child.once('close', (code, signal) => {
+      activeChildren.delete(child);
       clearTimeout(timer);
       const redact = options.redact ?? ((value: string) => value);
       const result = {

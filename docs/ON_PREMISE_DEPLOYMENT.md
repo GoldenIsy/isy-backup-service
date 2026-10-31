@@ -27,10 +27,10 @@ internet access or the Docker socket.
 No registry login is required:
 
 ```bash
-docker pull ghcr.io/goldenisy/isy-backup-agent:0.1.0
+docker pull ghcr.io/goldenisy/isy-backup-agent:0.2.0
 docker run --rm --read-only --cap-drop ALL \
   --security-opt no-new-privileges \
-  ghcr.io/goldenisy/isy-backup-agent:0.1.0 version
+  ghcr.io/goldenisy/isy-backup-agent:0.2.0 version
 ```
 
 After qualification, replace the tag with the published immutable digest:
@@ -95,7 +95,17 @@ never attempted implicitly during a scheduled backup.
 
 ## 6. Backup and evidence
 
-Run a controlled backup with:
+Start the admitted long-running service with:
+
+```bash
+docker compose up -d backup
+docker compose ps backup
+```
+
+The service schedules backups from the `service` configuration, emits its
+heartbeat independently, and remains alive in `DEGRADED` state after a backup
+failure so the parent can distinguish liveness from backup freshness. Run a
+controlled one-shot backup with:
 
 ```bash
 docker compose run --rm backup backup --config /etc/isy-backup/config.yml

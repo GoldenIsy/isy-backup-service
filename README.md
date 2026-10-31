@@ -14,14 +14,17 @@ The authorities are:
 
 ## Current status
 
-The repository now contains a tested command-line runtime foundation. It can
+The repository now contains a tested long-running runtime and one-shot command
+surface. It can
 validate configuration, diagnose dependencies, capture filesystem,
 PostgreSQL, and MinIO/S3 data, create and check Restic snapshots, list
-snapshots, and restore a snapshot into an isolated directory.
+snapshots, and restore a snapshot into an isolated directory. `serve` schedules
+recurring backups, publishes an independent heartbeat, exposes private
+liveness/readiness/status endpoints, recovers interrupted journal state, and
+handles orderly container shutdown.
 
-It is not yet a production backup authority. A locally buildable one-shot OCI
-image exists, but the long-running scheduler, external heartbeat parent, Slack
-bridge integration, retention,
+It is not yet a production backup authority. The external heartbeat parent,
+Slack bridge integration, retention,
 automatic restore tests, and live provider qualification remain open. Existing
 IsyReport and IsyDocs backup paths remain active until the contract's migration
 gates are completed.
@@ -67,8 +70,8 @@ isy-backup-service/
 
 Generated JavaScript is written to `dist/` and is not versioned.
 
-The current container deliberately runs one command and exits. Build and smoke
-test it locally with:
+The container defaults to the long-running service. Build and inspect it locally
+without starting the service with:
 
 ```bash
 docker build -t isy-backup-agent:local .
@@ -76,9 +79,8 @@ docker run --rm --read-only --cap-drop ALL \
   --security-opt no-new-privileges isy-backup-agent:local version
 ```
 
-[`compose.example.yml`](compose.example.yml) shows the security and mount
-boundary for an externally scheduled one-shot backup. It is not the final
-long-running deployment definition.
+[`compose.example.yml`](compose.example.yml) shows the long-running security,
+health, configuration, and mount boundary.
 
 Remote and on-premise installation is documented in
 [`docs/ON_PREMISE_DEPLOYMENT.md`](docs/ON_PREMISE_DEPLOYMENT.md). The public
@@ -89,6 +91,7 @@ repository-scoped token and does not require a personal Git password or token.
 
 ```text
 isy-backup version
+isy-backup serve --config /absolute/config.yml
 isy-backup config validate --config /absolute/config.yml
 isy-backup doctor --config /absolute/config.yml
 isy-backup repository init --config /absolute/config.yml --target <id>
@@ -98,6 +101,7 @@ isy-backup snapshots --config /absolute/config.yml --target <id>
 isy-backup restore --config /absolute/config.yml --target <id> \
   --snapshot <id> --output /new/isolated/path
 isy-backup status --config /absolute/config.yml
+isy-backup status --healthcheck --config /absolute/config.yml
 ```
 
 Repository initialization is deliberately separate from scheduled/manual

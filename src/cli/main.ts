@@ -9,6 +9,7 @@ import { runBackup } from '../operations/backup.js';
 import { doctor } from '../operations/doctor.js';
 import { runRestore } from '../operations/restore.js';
 import { imageIdentity } from '../runtime/version.js';
+import { healthcheck, runService } from '../runtime/service.js';
 
 function option(name: string, required = true): string | undefined {
   const index = process.argv.indexOf(name);
@@ -43,6 +44,10 @@ async function main(): Promise<number> {
     return 0;
   }
   const loaded = loadConfig(configPath());
+  if (command === 'serve') {
+    await runService(loaded);
+    return 0;
+  }
   if (command === 'doctor') {
     const result = await doctor(loaded.config);
     emit({ schema: 'isy.backup.doctor/v1', ...result });
@@ -78,6 +83,10 @@ async function main(): Promise<number> {
     return 0;
   }
   if (command === 'status') {
+    if (process.argv.includes('--healthcheck')) {
+      emit(healthcheck(loaded));
+      return 0;
+    }
     const statusFile = path.join(loaded.config.state_directory, 'status.json');
     if (!fs.existsSync(statusFile)) throw new BackupError('STATUS_UNAVAILABLE', 3, 'no completed backup status exists', 'status');
     emit(JSON.parse(fs.readFileSync(statusFile, 'utf8')));

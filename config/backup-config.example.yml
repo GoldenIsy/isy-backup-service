@@ -3,6 +3,12 @@ deployment: development
 environment: test
 state_directory: /var/lib/isy-backup
 staging_directory: /var/lib/isy-backup/staging
+service:
+  backup_interval_seconds: 86400
+  heartbeat_interval_seconds: 30
+  run_on_start: false
+  listen_address: 0.0.0.0
+  port: 8080
 sources:
   - id: application-files
     type: filesystem

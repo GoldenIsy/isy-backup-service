@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup-heartbeat-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deployment", "environment", "sequence", "runtime_instance_id", "observed_at", "config_sha256", "image", "state", "scheduler_responsive", "current_operation_id", "next_backup_at", "last_attempt_at", "last_success_at", "last_required_success_at", "target_freshness", "finding_codes"],
+  "properties": {
+    "schema": { "const": "isy.backup.heartbeat/v1" },
+    "deployment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "environment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "runtime_instance_id": { "type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" },
+    "observed_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "config_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": { "$ref": "https://isyreport.de/schemas/isy-backup-receipt-v1.json#/$defs/image" },
+    "state": { "enum": ["STARTING", "READY", "RUNNING", "DEGRADED", "STOPPING"] },
+    "scheduler_responsive": { "type": "boolean" },
+    "current_operation_id": { "type": ["string", "null"], "maxLength": 128 },
+    "next_backup_at": { "$ref": "#/$defs/nullableDate" },
+    "last_attempt_at": { "$ref": "#/$defs/nullableDate" },
+    "last_success_at": { "$ref": "#/$defs/nullableDate" },
+    "last_required_success_at": { "$ref": "#/$defs/nullableDate" },
+    "target_freshness": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+      "additionalProperties": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+      "maxProperties": 16
+    },
+    "finding_codes": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }
+    }
+  },
+  "$defs": {
+    "nullableDate": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" }
+      ]
+    }
+  }
+}
