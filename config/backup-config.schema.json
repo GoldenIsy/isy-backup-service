@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup-config-v1.json",
+  "title": "Isy Backup Service configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deployment", "environment", "state_directory", "staging_directory", "sources", "targets"],
+  "properties": {
+    "schema": { "const": "isy.backup.config/v1" },
+    "deployment": { "$ref": "#/$defs/id" },
+    "environment": { "$ref": "#/$defs/id" },
+    "state_directory": { "$ref": "#/$defs/absolutePath" },
+    "staging_directory": { "$ref": "#/$defs/absolutePath" },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "restic": { "type": "string", "minLength": 1 },
+        "rclone": { "type": "string", "minLength": 1 },
+        "pg_dump": { "type": "string", "minLength": 1 },
+        "pg_restore": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/filesystemSource" },
+          { "$ref": "#/$defs/postgresSource" },
+          { "$ref": "#/$defs/s3Source" }
+        ]
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/resticTarget" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "absolutePath": { "type": "string", "pattern": "^/", "minLength": 2, "maxLength": 4096 },
+    "commonSource": {
+      "type": "object",
+      "required": ["id", "type", "required"]
+    },
+    "filesystemSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required", "root"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "filesystem" },
+        "required": { "type": "boolean" },
+        "root": { "$ref": "#/$defs/absolutePath" }
+      }
+    },
+    "postgresSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required", "host", "port", "database", "username", "password_file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "postgres" },
+        "required": { "type": "boolean" },
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "database": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "password_file": { "$ref": "#/$defs/absolutePath" }
+      }
+    },
+    "s3Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required", "remote", "config_file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "s3" },
+        "required": { "type": "boolean" },
+        "remote": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}:[^\\r\\n]+$", "maxLength": 4096 },
+        "config_file": { "$ref": "#/$defs/absolutePath" }
+      }
+    },
+    "resticTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required", "repository", "password_file", "cache_directory"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["filesystem", "sftp", "s3", "rest-server", "rclone"] },
+        "required": { "type": "boolean" },
+        "repository": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "password_file": { "$ref": "#/$defs/absolutePath" },
+        "cache_directory": { "$ref": "#/$defs/absolutePath" },
+        "environment_secret_files": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+          "additionalProperties": { "$ref": "#/$defs/absolutePath" },
+          "maxProperties": 16
+        },
+        "environment_file_references": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+          "additionalProperties": { "$ref": "#/$defs/absolutePath" },
+          "maxProperties": 16
+        }
+      }
+    }
+  }
+}

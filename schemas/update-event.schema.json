@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup-update-event-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deployment", "environment", "observed_at", "current", "qualified", "result"],
+  "properties": {
+    "schema": { "const": "isy.backup.update-event/v1" },
+    "deployment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "environment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "observed_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "current": { "$ref": "#/$defs/image" },
+    "qualified": { "$ref": "#/$defs/image" },
+    "result": { "enum": ["CURRENT", "UPDATE_AVAILABLE", "OVERDUE", "UNKNOWN"] }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "digest"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

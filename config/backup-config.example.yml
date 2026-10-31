@@ -1,0 +1,17 @@
+schema: isy.backup.config/v1
+deployment: development
+environment: test
+state_directory: /var/lib/isy-backup
+staging_directory: /var/lib/isy-backup/staging
+sources:
+  - id: application-files
+    type: filesystem
+    required: true
+    root: /data/application
+targets:
+  - id: local
+    type: filesystem
+    required: true
+    repository: /backup/restic
+    password_file: /run/secrets/restic-password
+    cache_directory: /var/cache/isy-backup/local

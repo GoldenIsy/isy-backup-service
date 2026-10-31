@@ -1,0 +1,11 @@
+# Merge this target into a deployment configuration after creating the two
+# owner-only secret files. The rclone config contains the dedicated account's
+# OAuth token and must define an EU pCloud remote named `isy-pcloud`.
+id: pcloud-eu
+type: rclone
+required: true
+repository: rclone:isy-pcloud:Isyreport/Backups/restic
+password_file: /run/secrets/pcloud-restic-password
+cache_directory: /var/cache/isy-backup/pcloud-eu
+environment_file_references:
+  RCLONE_CONFIG: /run/secrets/pcloud-rclone.conf

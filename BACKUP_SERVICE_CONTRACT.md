@@ -1,6 +1,6 @@
 # Isy Backup Service Contract
 
-Status: proposed implementation contract
+Status: proposed product and architecture contract
 
 Contract version: 1
 

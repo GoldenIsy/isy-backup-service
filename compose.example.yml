@@ -1,0 +1,27 @@
+services:
+  backup:
+    # Replace this evaluation tag with the qualified immutable GHCR digest.
+    image: ghcr.io/goldenisy/isy-backup-agent:0.1.0
+    command: ["backup", "--config", "/etc/isy-backup/config.yml"]
+    environment:
+      # Must match the immutable image reference selected for this deployment.
+      ISY_BACKUP_IMAGE_DIGEST: ${ISY_BACKUP_IMAGE_DIGEST:?set qualified image digest}
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    volumes:
+      - ./config.yml:/etc/isy-backup/config.yml:ro
+      # Files must be owned by UID 1000 and mode 0600 on the host.
+      - ./secrets:/run/secrets:ro
+      - backup-state:/var/lib/isy-backup
+      - backup-cache:/var/cache/isy-backup
+      - /absolute/source/path:/data/application:ro
+    restart: "no"
+
+volumes:
+  backup-state:
+  backup-cache:

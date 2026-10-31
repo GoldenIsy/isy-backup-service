@@ -1,0 +1,27 @@
+{
+  "name": "@goldenisy/isy-backup-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "isy-backup": "dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test",
+    "test:contract": "node --test tests/contract/*.test.mjs",
+    "test:unit": "npm run build && node --test tests/unit/*.test.mjs",
+    "test:integration": "npm run build && node --test tests/integration/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup-receipt-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operation", "deployment", "environment", "backup_set_id", "result", "started_at", "completed_at", "config_sha256", "image", "sources", "targets", "findings"],
+  "properties": {
+    "schema": { "const": "isy.backup.receipt/v1" },
+    "operation": { "const": "backup" },
+    "deployment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "environment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "backup_set_id": { "type": "string", "maxLength": 128 },
+    "result": { "enum": ["PASS", "WARN", "FAIL"] },
+    "started_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "completed_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "config_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "source_revision", "digest"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][a-zA-Z0-9.-]+)?$" },
+        "source_revision": { "type": "string", "pattern": "^(?:development|[a-f0-9]{7,64})$" },
+        "digest": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          ]
+        }
+      }
+    },
+    "sources": { "type": "array", "maxItems": 32 },
+    "targets": { "type": "array", "maxItems": 16 },
+    "findings": { "type": "array", "maxItems": 64 }
+  }
+}
