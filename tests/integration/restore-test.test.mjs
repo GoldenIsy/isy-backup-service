@@ -35,7 +35,8 @@ test('PostgreSQL restore verification stages schema, data, and constraints with 
     fs.writeFileSync(path.join(archive,'manifest.json'),JSON.stringify({schema:'isy.backup.manifest/v1',backup_set_id:'backup-set-postgres',sources:[{id:'postgres',type:'postgres',required:true,result:'PASS',sha256:hash(dump)}]}));
     const events=path.join(value.root,'postgres-events');
     const restic=executable(value.root,'restore-restic-postgres',`#!/usr/bin/env node\nconst fs=require('node:fs'),path=require('node:path');const a=process.argv.slice(2);if(a.includes('restore'))fs.cpSync(${JSON.stringify(path.dirname(archive))},a[a.indexOf('--target')+1],{recursive:true});\n`);
-    const psql=executable(value.root,'restore-psql',`#!/usr/bin/env node\nconst fs=require('node:fs'),a=process.argv.slice(2),command=a[a.indexOf('--command')+1]||'';fs.appendFileSync(${JSON.stringify(events)},'psql '+command.replaceAll('\\n',' ')+'\\n');if(a.includes('--tuples-only'))process.stdout.write('1\\n');\n`);
+    const dropFailure=path.join(value.root,'drop-failed-once');
+    const psql=executable(value.root,'restore-psql',`#!/usr/bin/env node\nconst fs=require('node:fs'),a=process.argv.slice(2),command=a[a.indexOf('--command')+1]||'';fs.appendFileSync(${JSON.stringify(events)},'psql '+command.replaceAll('\\n',' ')+'\\n');if(command.startsWith('DROP DATABASE')&&!fs.existsSync(${JSON.stringify(dropFailure)})){fs.writeFileSync(${JSON.stringify(dropFailure)},'1');process.exit(17);}if(a.includes('--tuples-only'))process.stdout.write('1\\n');\n`);
     const pgRestore=executable(value.root,'restore-pg-restore',`#!/usr/bin/env node\nconst fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(events)},'pg_restore '+a.join(' ')+'\\n');\n`);
     const restorePassword=path.join(value.root,'restore.pgpass');fs.writeFileSync(restorePassword,'fixture',{mode:0o600});
     const configFile=writeConfig(value,{sources:[{id:'postgres',type:'postgres',required:true,host:'db',port:5432,database:'app',username:'backup',password_file:value.password}],tools:{restic,psql,pg_restore:pgRestore},restore_test:{enabled:true,directory:path.join(value.root,'restore-tests'),interval_seconds:3600,target_id:'primary',postgres_verifier:{host:'db',port:5432,username:'restore',password_file:restorePassword,maintenance_database:'postgres',database_prefix:'restore_test'}}});
@@ -48,5 +49,6 @@ test('PostgreSQL restore verification stages schema, data, and constraints with 
     assert.match(lines[2],/^psql .*ALTER FUNCTION .* SET search_path TO public, pg_catalog/u);
     assert.match(lines[3],/pg_restore .*--exit-on-error .*--section data/u);
     assert.match(lines[4],/pg_restore .*--exit-on-error .*--section post-data/u);
+    assert.equal(lines.filter((line)=>line.startsWith('psql DROP DATABASE')).length,2);
   }finally{value.cleanup();}
 });
