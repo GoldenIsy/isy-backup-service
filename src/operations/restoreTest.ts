@@ -38,8 +38,26 @@ async function verifyPostgres(loaded:LoadedConfig,dump:string,database:string):P
   const common=['--host',verifier.host,'--port',String(verifier.port),'--username',verifier.username]; const env={PGPASSFILE:verifier.password_file}; const psql=loaded.config.tools?.psql??'psql';
   const create=await runCommand(psql,[...common,'--dbname',verifier.maintenance_database,'--set','ON_ERROR_STOP=1','--command',`CREATE DATABASE "${database}"`],{env,timeoutMs:5*60_000});
   if(create.exitCode!==0)throw new BackupError('RESTORE_TEST_DATABASE_CREATE_FAILED',6,'isolated verification database could not be created','restore-test');
-  const restore=await runCommand(loaded.config.tools?.pg_restore??'pg_restore',[...common,'--dbname',database,'--no-owner','--no-privileges',dump],{env,timeoutMs:60*60_000});
-  if(restore.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,'PostgreSQL restore into verifier failed','restore-test');
+  const pgRestore=loaded.config.tools?.pg_restore??'pg_restore';
+  const restoreSection=async(section:'pre-data'|'data'|'post-data'):Promise<void>=>{
+    const restore=await runCommand(pgRestore,[...common,'--dbname',database,'--exit-on-error','--no-owner','--no-privileges','--section',section,dump],{env,timeoutMs:60*60_000});
+    if(restore.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,`PostgreSQL ${section} restore into verifier failed`,'restore-test');
+  };
+  await restoreSection('pre-data');
+  const functionSearchPath=await runCommand(psql,[...common,'--dbname',database,'--set','ON_ERROR_STOP=1','--command',`DO $$
+    DECLARE item record;
+    BEGIN
+      FOR item IN
+        SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS arguments
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+      LOOP
+        EXECUTE format('ALTER FUNCTION %I.%I(%s) SET search_path TO public, pg_catalog', item.nspname, item.proname, item.arguments);
+      END LOOP;
+    END $$`],{env,timeoutMs:5*60_000});
+  if(functionSearchPath.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,'PostgreSQL verifier function search path could not be hardened','restore-test');
+  await restoreSection('data');
+  await restoreSection('post-data');
   const query=await runCommand(psql,[...common,'--dbname',database,'--tuples-only','--set','ON_ERROR_STOP=1','--command',"SELECT count(*) FROM pg_catalog.pg_class WHERE relkind IN ('r','p')"],{env,timeoutMs:5*60_000});
   if(query.exitCode!==0||!/^\s*[0-9]+\s*$/u.test(query.stdout))throw new BackupError('RESTORE_TEST_POSTGRES_INVARIANT_FAILED',6,'PostgreSQL restore invariant failed','restore-test');
 }
