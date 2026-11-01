@@ -42,9 +42,12 @@ durably admitted before execution.
 The runtime carries PostgreSQL 16 client tools. PostgreSQL sources must use
 major version 16 so capture never relies on an older `pg_dump` than the server.
 
-The IsyDocs development deployment is the first qualified pilot. Production
-activation and retirement of incumbent backup paths remain separate rollout
-decisions.
+The IsyDocs development deployment was the first qualified pilot. IsyDocs
+production activated the digest-pinned service on 2026-11-01 after dual-target
+backup, repeated isolated pCloud restore, guarded snapshot deletion, and live
+L4 proof. Its former Jenkins scheduler is disabled and retained only as
+rollback evidence. Other services still require their own admission and
+retirement decisions.
 
 The intended delivery is one versioned OCI image deployed as a separate
 instance in each application stack. Every instance has its own configuration,
