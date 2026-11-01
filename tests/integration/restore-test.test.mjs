@@ -22,6 +22,8 @@ test('isolated restore test restores and verifies filesystem backup evidence',as
     store.recordBackup({schema:'isy.backup.receipt/v1',operation:'backup',deployment:'test-deployment',environment:'test',backup_set_id:'backup-set-001',result:'PASS',started_at:'2026-11-01T00:00:00Z',completed_at:'2026-11-01T00:01:00Z',config_sha256:loaded.sha256,image:{version:'0.2.0',source_revision:'test',digest:null},sources:[{id:'files',type:'filesystem',required:true,result:'PASS',artifact:'/redacted',sha256:hash(JSON.stringify(entries)),bytes:14,entries:1}],targets:[{id:'primary',type:'filesystem',required:true,result:'PASS',snapshot_id:'0123456789abcdef',verification:'RESTIC_CHECK'}],findings:[]},'schedule');
     const result=await runRestoreTest(loaded,'88888888-8888-4888-8888-888888888888');
     assert.equal(result.result,'PASS');assert.equal(result.operation.kind,'restore-test');assert.equal(fs.existsSync(path.join(value.root,'restore-tests','restore-test-88888888-8888-4888-8888-888888888888')),false);
+    const repeated=await runRestoreTest(loaded,'77777777-7777-4777-8777-777777777777');
+    assert.equal(repeated.result,'PASS');assert.equal(repeated.targets[0].snapshot_id,'0123456789abcdef');
   }finally{value.cleanup();}
 });
 

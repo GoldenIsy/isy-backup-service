@@ -24,7 +24,7 @@ function files(root: string): Array<{ path_sha256: string; content_sha256: strin
 }
 
 function latestSnapshot(store: EvidenceStore, targetId: string): { snapshotId: string; backupSetId: string } {
-  const receipt=store.latestReceipt((candidate)=>candidate.targets.some((item)=>item.id===targetId&&item.result==='PASS'&&item.snapshot_id));
+  const receipt=store.latestReceipt((candidate)=>candidate.operation.kind==='backup'&&candidate.targets.some((item)=>item.id===targetId&&item.result==='PASS'&&item.snapshot_id));
   if(receipt){const target=receipt.targets.find((item)=>item.id===targetId&&item.result==='PASS'&&item.snapshot_id);if(target?.snapshot_id)return{snapshotId:target.snapshot_id,backupSetId:receipt.backup_set_id};}
   throw new BackupError('RESTORE_TEST_SNAPSHOT_UNAVAILABLE',6,'no verified snapshot is available','restore-test');
 }
