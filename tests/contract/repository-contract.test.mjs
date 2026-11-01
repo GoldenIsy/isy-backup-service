@@ -10,7 +10,8 @@ const authorityFiles = [
   'BACKUP_SERVICE_CONTRACT.md',
   'IMPLEMENTATION_CONTRACT.md',
   'TESTING_CONTRACT.md',
-  'docs/ON_PREMISE_DEPLOYMENT.md'
+  'docs/ON_PREMISE_DEPLOYMENT.md',
+  'docs/SAAS_CONTROL_PLANE_INTEGRATION.md'
 ];
 
 function read(relative) {

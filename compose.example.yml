@@ -1,12 +1,27 @@
 services:
+  backup-control-init:
+    image: ${ISY_BACKUP_IMAGE:?set qualified backup image by digest}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["install -d -o 1000 -g 1001 -m 0750 /run/isy-backup && install -d -o 1000 -g 1000 -m 0700 /var/lib/isyreport-installation-agent"]
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - backup-control:/run/isy-backup
+      - installation-agent-state:/var/lib/isyreport-installation-agent
+    restart: "no"
+
   backup:
-    # Replace this evaluation tag with the qualified immutable GHCR digest.
-    image: ghcr.io/goldenisy/isy-backup-agent:0.2.0
+    image: ${ISY_BACKUP_IMAGE:?set qualified backup image by digest}
     command: ["serve", "--config", "/etc/isy-backup/config.yml"]
     environment:
       # Must match the immutable image reference selected for this deployment.
       ISY_BACKUP_IMAGE_DIGEST: ${ISY_BACKUP_IMAGE_DIGEST:?set qualified image digest}
     user: "1000:1000"
+    group_add: ["1001"]
     read_only: true
     cap_drop: ["ALL"]
     security_opt:
@@ -25,9 +40,47 @@ services:
       - ./secrets:/run/secrets:ro
       - backup-state:/var/lib/isy-backup
       - backup-cache:/var/cache/isy-backup
+      - backup-control:/run/isy-backup
       - /absolute/source/path:/data/application:ro
+    depends_on:
+      backup-control-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  backup-installation-agent:
+    image: ${ISY_INSTALLATION_AGENT_IMAGE:?set qualified installation-agent image by digest}
+    environment:
+      ISY_INSTALLATION_AGENT_BACKUP_ONLY: "1"
+      ISY_INSTALLATION_AGENT_BOOTSTRAP_FILE: /run/configs/installation-agent-bootstrap.json
+      ISY_INSTALLATION_AGENT_TRUST_BUNDLES_FILE: /run/configs/installation-agent-trust-bundles.json
+      ISY_INSTALLATION_AGENT_STATE_DIR: /var/lib/isyreport-installation-agent
+      ISY_INSTALLATION_AGENT_BACKUP_SOCKET: /run/isy-backup/backup.sock
+      ISY_INSTALLATION_AGENT_BACKUP_IDENTITY_FILE: /run/isy-backup/installation-id
+      ISY_INSTALLATION_AGENT_SOURCE_SHA: ${ISY_INSTALLATION_AGENT_SOURCE_SHA:?set exact 40-character source revision}
+      ISY_INSTALLATION_AGENT_MANIFEST_DIGEST: ${ISY_INSTALLATION_AGENT_MANIFEST_DIGEST:?set qualified sha256 manifest digest}
+      ISY_INSTALLATION_AGENT_VERSION: ${ISY_INSTALLATION_AGENT_VERSION:?set semantic agent version}
+    user: "1000:1000"
+    group_add: ["1001"]
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700
+    volumes:
+      - ./agent/bootstrap.json:/run/configs/installation-agent-bootstrap.json:ro
+      - ./agent/trust-bundles.json:/run/configs/installation-agent-trust-bundles.json:ro
+      - installation-agent-state:/var/lib/isyreport-installation-agent
+      - backup-control:/run/isy-backup
+    depends_on:
+      backup-control-init:
+        condition: service_completed_successfully
+      backup:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   backup-state:
   backup-cache:
+  backup-control:
+  installation-agent-state:

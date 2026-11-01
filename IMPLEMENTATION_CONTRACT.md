@@ -24,6 +24,11 @@ conflict is resolved in both documents. Implementation convenience must not
 weaken restore proof, credential isolation, required-target failure semantics,
 or externally detected absence.
 
+The target SaaS-IsyReport integration and the concrete backup-runtime delta are
+owned by [`docs/SAAS_CONTROL_PLANE_INTEGRATION.md`](docs/SAAS_CONTROL_PLANE_INTEGRATION.md).
+That integration uses the local installation agent and does not authorize the
+backup container to hold SaaS credentials or expose a public listener.
+
 The first implementation is a standalone service. Existing IsyReport and
 IsyDocs backup paths remain active authorities until a deployment completes the
 migration gates in Section 17.
@@ -422,6 +427,7 @@ prefixes, or filesystem roots.
 ```text
 /etc/isy-backup/config.yml         read-only configuration
 /run/secrets/                      read-only runtime secrets
+/run/isy-backup/control.sock       optional local read-only agent interface
 /var/lib/isy-backup/journal/       operation journal
 /var/lib/isy-backup/receipts/      final receipts
 /var/lib/isy-backup/manifests/     capture manifests
@@ -491,12 +497,15 @@ The parent authenticates deployment identity, rejects stale replays, and treats
 silence as failure after its deadline. The agent cannot mark itself externally
 healthy merely by sending a heartbeat; the parent computes freshness.
 
-### 11.3 Parent delivery
+### 11.3 Installation-agent boundary
 
-HTTP delivery uses TLS, a per-deployment credential, idempotency key, bounded
-timeouts, exponential backoff with jitter, and a bounded local outbox. Backup
-success does not depend on immediate parent availability. Delivery failure
-produces persistent `DEGRADED` state and a local finding.
+The backup service does not deliver to the SaaS parent. With explicit control
+configuration it exposes bounded read-only evidence on an owner/group-restricted
+Unix socket. The installation agent copies accepted evidence into its own
+durable public-transport outbox. Backup success never depends on the socket,
+the installation agent, or SaaS availability. The socket has no generic API,
+public listener, SaaS credential, provider credential, Docker socket, or
+mutation route in the read-only phase.
 
 ## 12. Slack boundary
 

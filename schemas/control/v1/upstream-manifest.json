@@ -1,0 +1,7 @@
+{
+  "schema": "isy.backup.control-protocol-upstream-manifest/v1",
+  "files": {
+    "payload-fixtures.json": "sha256:22736259d905179108b77f8e7fc5f74b15cda3ebeaedd0a598649ec0d26cf59d",
+    "protocol.schema.json": "sha256:dc44683b61c8813fc4d419b7001550789a5bd75cbd90b5b7f0d5efe08f26475c"
+  }
+}

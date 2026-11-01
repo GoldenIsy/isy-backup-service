@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup-retention-receipt-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "operation", "operation_id", "deployment", "environment", "target", "result", "code", "started_at", "completed_at", "config_sha256", "image", "policy"],
+  "properties": {
+    "schema": { "const": "isy.backup.retention-receipt/v1" },
+    "operation": { "const": "retention" },
+    "operation_id": { "type": "string", "format": "uuid" },
+    "deployment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "environment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "target": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "result": { "enum": ["PASS", "FAIL"] },
+    "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,79}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "config_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": {
+      "type": "object", "additionalProperties": false, "required": ["version", "source_revision", "digest"],
+      "properties": {
+        "version": { "type": "string" }, "source_revision": { "type": "string" },
+        "digest": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }] }
+      }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "properties": {
+        "keep_hourly": { "type": "integer", "minimum": 1 }, "keep_daily": { "type": "integer", "minimum": 1 },
+        "keep_weekly": { "type": "integer", "minimum": 1 }, "keep_monthly": { "type": "integer", "minimum": 1 },
+        "keep_yearly": { "type": "integer", "minimum": 1 }, "keep_within": { "type": "string", "pattern": "^[1-9][0-9]*(?:h|d|m|y)$" }
+      }
+    }
+  }
+}

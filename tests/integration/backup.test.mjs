@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { loadConfig } from '../../dist/config/load.js';
 import { runBackup } from '../../dist/operations/backup.js';
+import { EvidenceStore } from '../../dist/evidence/store.js';
 import { executable, fixture, fakeRestic, secret, writeConfig } from '../helpers/fixture.mjs';
 
 test('filesystem capture plus required target passes and publishes durable evidence', async () => {
@@ -19,8 +20,32 @@ test('filesystem capture plus required target passes and publishes durable evide
     assert.equal(fs.existsSync(path.join(value.staging, receipt.backup_set_id)), false);
     const receiptFile = path.join(value.state, 'receipts', '2026-10-31', `${receipt.backup_set_id}.json`);
     assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, 'utf8')), receipt);
+    const evidence = new EvidenceStore(value.state).listReceipts(null, 10);
+    assert.equal(evidence.receipts.length, 1);
+    assert.equal(evidence.receipts[0].backup_set_id, receipt.backup_set_id);
+    assert.equal(evidence.receipts[0].operation.trigger, 'local-manual');
+    assert.equal(evidence.receipts[0].targets[0].verification, 'METADATA');
     const journal = fs.readFileSync(path.join(value.state, 'journal', `${receipt.backup_set_id}.jsonl`), 'utf8');
     assert.match(journal, /"state":"PASS"/u);
+  } finally { value.cleanup(); }
+});
+
+test('read-data verification downloads and authenticates repository pack data', async () => {
+  const value = fixture();
+  try {
+    fs.writeFileSync(path.join(value.source, 'document.txt'), 'recoverable content');
+    const restic = fakeRestic(value);
+    const targets = [{
+      id: 'primary', type: 'filesystem', required: true,
+      repository: path.join(value.root, 'repository-primary'),
+      password_file: value.password,
+      cache_directory: path.join(value.root, 'cache-primary'),
+      verification: 'read-data'
+    }];
+    const receipt = await runBackup(loadConfig(writeConfig(value, { tools: { restic }, targets })));
+    assert.equal(receipt.targets[0].verification, 'RESTIC_READ_DATA');
+    const checkArgs = fs.readFileSync(path.join(value.root, 'check-arguments'), 'utf8').split('\n');
+    assert.deepEqual(checkArgs.slice(-2), ['check', '--read-data']);
   } finally { value.cleanup(); }
 });
 
@@ -58,7 +83,7 @@ test('DST-001 required target failure returns FAIL and retains staged recovery e
   } finally { value.cleanup(); }
 });
 
-test('MON-003 failed attempts preserve prior success and per-target freshness', async () => {
+test('MON-003 freshness is preserved only while configuration identity is unchanged', async () => {
   const value = fixture();
   try {
     fs.writeFileSync(path.join(value.source, 'document.txt'), 'recoverable content');
@@ -71,9 +96,10 @@ test('MON-003 failed attempts preserve prior success and per-target freshness', 
     assert.equal(failure.result, 'FAIL');
     const status = JSON.parse(fs.readFileSync(path.join(value.state, 'status.json'), 'utf8'));
     assert.equal(status.last_attempt_at, failure.completed_at);
-    assert.equal(status.last_success_at, success.completed_at);
-    assert.equal(status.last_required_success_at, success.completed_at);
-    assert.equal(status.target_freshness.primary, success.completed_at);
+    assert.equal(status.config_sha256, loadConfig(writeConfig(value, { tools: { restic }, targets })).sha256);
+    assert.equal(status.last_success_at, null);
+    assert.equal(status.last_required_success_at, null);
+    assert.deepEqual(status.target_freshness, {});
   } finally { value.cleanup(); }
 });
 

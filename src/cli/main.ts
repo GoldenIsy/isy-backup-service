@@ -2,12 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { checkRepository, initializeRepository, listSnapshots } from '../adapters/targets/restic.js';
+import { checkRepository, forgetSnapshot, initializeRepository, listSnapshots } from '../adapters/targets/restic.js';
 import { loadConfig } from '../config/load.js';
 import { BackupError, errorMessage } from '../domain/errors.js';
+import { exportDeployment } from '../deployment/export.js';
 import { runBackup } from '../operations/backup.js';
 import { doctor } from '../operations/doctor.js';
 import { runRestore } from '../operations/restore.js';
+import { runRestoreTest } from '../operations/restoreTest.js';
+import { runRetention } from '../operations/retention.js';
 import { imageIdentity } from '../runtime/version.js';
 import { healthcheck, runService } from '../runtime/service.js';
 
@@ -36,6 +39,12 @@ async function main(): Promise<number> {
   const [command, subcommand] = process.argv.slice(2);
   if (command === 'version') {
     emit({ schema: 'isy.backup.version/v1', ...imageIdentity(), node: process.version });
+    return 0;
+  }
+  if (command === 'deployment' && subcommand === 'export') {
+    const output = path.resolve(option('--output') ?? '');
+    const files = exportDeployment(output);
+    emit({ schema: 'isy.backup.deployment-export/v1', result: 'PASS', output, files });
     return 0;
   }
   if (command === 'config' && subcommand === 'validate') {
@@ -81,6 +90,27 @@ async function main(): Promise<number> {
     await runRestore(loaded.config, target, option('--snapshot') ?? '', option('--output') ?? '');
     emit({ schema: 'isy.backup.restore/v1', target: target.id, snapshot: option('--snapshot'), output: option('--output'), result: 'PASS' });
     return 0;
+  }
+  if (command === 'restore-test') {
+    const result = await runRestoreTest(loaded);
+    emit(result);
+    return result.result === 'PASS' ? 0 : 6;
+  }
+  if (command === 'forget') {
+    const target = targetById(loaded.config, option('--target'));
+    const snapshot = option('--snapshot') ?? '';
+    if (option('--confirm-delete') !== snapshot) {
+      throw new BackupError('DELETE_CONFIRMATION_REQUIRED', 2, '--confirm-delete must exactly match --snapshot', 'invocation');
+    }
+    await forgetSnapshot(target, loaded.config.tools ?? {}, snapshot);
+    emit({ schema: 'isy.backup.repository-operation/v1', operation: 'forget-prune', target: target.id, snapshot, result: 'PASS' });
+    return 0;
+  }
+  if (command === 'retention') {
+    const target = targetById(loaded.config, option('--target'));
+    const receipt = await runRetention(loaded, target);
+    emit(receipt);
+    return receipt.result === 'PASS' ? 0 : 6;
   }
   if (command === 'status') {
     if (process.argv.includes('--healthcheck')) {

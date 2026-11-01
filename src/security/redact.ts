@@ -1,7 +1,7 @@
 const CREDENTIAL_FIELD = /\b(password|passwd|secret|token|authorization|credential|access[_-]?key)\b\s*[:=]\s*([^\s,;]+)/giu;
 const URL_CREDENTIAL = /(https?:\/\/[^\s/:@]+:)[^\s/@]+@/giu;
 
-export function createRedactor(secretValues: readonly string[] = []): (value: string) => string {
+export function createRedactor(secretValues: readonly string[] = [], maximumLength = 4096): (value: string) => string {
   const secrets = [...new Set(secretValues.filter((value) => value.length >= 3))].sort((a, b) => b.length - a.length);
   return (input: string): string => {
     let output = input;
@@ -9,7 +9,7 @@ export function createRedactor(secretValues: readonly string[] = []): (value: st
     return output
       .replace(URL_CREDENTIAL, '$1[REDACTED]@')
       .replace(CREDENTIAL_FIELD, '$1=[REDACTED]')
-      .slice(0, 4096);
+      .slice(0, maximumLength);
   };
 }
 

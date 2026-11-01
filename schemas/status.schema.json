@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isyreport.de/schemas/isy-backup/status-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deployment", "environment", "config_sha256", "last_attempt_at", "last_success_at", "last_required_success_at", "target_freshness", "result", "backup_set_id", "image", "finding_codes"],
+  "properties": {
+    "schema": { "const": "isy.backup.status/v1" },
+    "deployment": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+    "environment": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "config_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "last_attempt_at": { "$ref": "#/$defs/date" },
+    "last_success_at": { "$ref": "#/$defs/nullableDate" },
+    "last_required_success_at": { "$ref": "#/$defs/nullableDate" },
+    "target_freshness": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/date" }
+    },
+    "result": { "enum": ["PASS", "WARN", "FAIL"] },
+    "backup_set_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "image": { "$ref": "https://isyreport.de/schemas/isy-backup-receipt-v1.json#/$defs/image" },
+    "finding_codes": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "pattern": "^[A-Z0-9_]{1,128}$" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "date": { "type": "string", "format": "date-time" },
+    "nullableDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+  }
+}

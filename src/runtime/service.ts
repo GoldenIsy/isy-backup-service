@@ -3,18 +3,44 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import type { LoadedConfig } from '../config/load.js';
+import { startControlServer, type ControlServerHandle } from '../control/server.js';
+import { ControlCommandService, type LocalCommand, type LocalCommandResult } from '../control/commands.js';
+import { checkRepository, checkRepositoryReadData } from '../adapters/targets/restic.js';
 import { BackupError, errorMessage } from '../domain/errors.js';
-import type { BackupReceipt, Heartbeat, ServiceConfig, ServiceState } from '../domain/types.js';
+import type { BackupReceipt, ControlConfig, Heartbeat, ServiceConfig, ServiceState } from '../domain/types.js';
+import { buildObservation, EvidenceStore, observationState } from '../evidence/store.js';
 import { runBackup } from '../operations/backup.js';
+import { runRestoreTest } from '../operations/restoreTest.js';
 import { doctor } from '../operations/doctor.js';
 import { ensurePrivateDirectory, writeJsonAtomic } from './atomic.js';
 import { appendJournal } from './journal.js';
+import { acquireLock, recoverStaleMutationLock } from './lock.js';
 import { terminateActiveCommands } from './process.js';
 import { imageIdentity } from './version.js';
 
-const TERMINAL_JOURNAL_STATES = new Set(['PASS', 'WARN', 'FAIL', 'INTERRUPTED']);
+const TERMINAL_JOURNAL_STATES = new Set(['PASS', 'WARN', 'FAIL', 'CANCELLED', 'INTERRUPTED']);
+const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function controlInstallationId(control: ControlConfig): string | null {
+  if (control.installation_id) return control.installation_id;
+  if (!control.installation_id_file) return null;
+  try {
+    const stat = fs.lstatSync(control.installation_id_file);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) return null;
+    const value = fs.readFileSync(control.installation_id_file, 'utf8').trim();
+    return INSTALLATION_ID.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function enabledControlCommands(loaded: LoadedConfig, control: ControlConfig): LocalCommand['action'][] {
+  return (control.allowed_commands ?? []).filter((action) =>
+    action !== 'restore-test' || loaded.config.restore_test?.enabled === true);
+}
 
 interface PersistedStatus {
+  config_sha256?: string;
   last_attempt_at?: string | null;
   last_success_at?: string | null;
   last_required_success_at?: string | null;
@@ -80,9 +106,7 @@ export function buildHeartbeat(
 
 function recoverInterruptedState(stateDirectory: string): string[] {
   const findings: string[] = [];
-  const lock = path.join(stateDirectory, 'locks', 'mutation.lock');
-  if (fs.existsSync(lock)) {
-    fs.unlinkSync(lock);
+  if (recoverStaleMutationLock(stateDirectory)) {
     findings.push('INTERRUPTED_LOCK_RECOVERED');
   }
   const journalDirectory = path.join(stateDirectory, 'journal');
@@ -103,9 +127,39 @@ function recoverInterruptedState(stateDirectory: string): string[] {
   return [...new Set(findings)];
 }
 
-function writeHeartbeat(loaded: LoadedConfig, runtimeInstanceId: string, runtime: MutableRuntime): Heartbeat {
+function writeHeartbeat(
+  loaded: LoadedConfig,
+  runtimeInstanceId: string,
+  runtime: MutableRuntime,
+  evidenceStore: EvidenceStore,
+): Heartbeat {
   const heartbeat = buildHeartbeat(loaded, runtimeInstanceId, runtime);
   writeJsonAtomic(heartbeatFile(loaded.config.state_directory), heartbeat);
+  const control = loaded.config.control;
+  if (control?.enabled) {
+    const installationId = controlInstallationId(control);
+    if (!installationId) return heartbeat;
+    evidenceStore.publishObservation(buildObservation({
+      installationId,
+      deployment: loaded.config.deployment,
+      environment: loaded.config.environment,
+      runtimeInstanceId,
+      sequence: evidenceStore.nextObservationSequence(),
+      observedAt: new Date(heartbeat.observed_at),
+      configSha256: loaded.sha256,
+      image: heartbeat.image,
+      serviceState: observationState(runtime.state),
+      schedulerResponsive: heartbeat.scheduler_responsive,
+      currentOperationId: runtime.currentOperationId,
+      nextBackupAt: runtime.nextBackupAt,
+      status: runtime.status,
+      capabilities: [
+        'backup.history.v1', 'backup.observation.v1',
+        ...(enabledControlCommands(loaded, control).map((action) => action === 'backup' ? 'backup.run.v1' : `backup.${action}.v1`)),
+      ],
+      update: { state: 'UNKNOWN', available_version: null, available_digest: null },
+    }));
+  }
   return heartbeat;
 }
 
@@ -210,18 +264,27 @@ export async function runService(loaded: LoadedConfig): Promise<void> {
   const service = requireServiceConfig(loaded);
   ensurePrivateDirectory(loaded.config.state_directory);
   ensurePrivateDirectory(loaded.config.staging_directory);
-  const runtimeInstanceId = crypto.randomUUID();
+  const evidenceStore = new EvidenceStore(loaded.config.state_directory);
+  const runtimeInstanceId = evidenceStore.runtimeIdentity().runtime_instance_id;
   const releaseServiceLock = acquireServiceLock(loaded, runtimeInstanceId);
-  const previousStatus = readStatus(loaded.config.state_directory);
+  const persistedStatus = readStatus(loaded.config.state_directory);
+  const previousStatus = persistedStatus.config_sha256 === loaded.sha256 ? persistedStatus : {};
+  let recoveryFindings: string[];
+  try {
+    recoveryFindings = recoverInterruptedState(loaded.config.state_directory);
+  } catch (error) {
+    releaseServiceLock();
+    throw error;
+  }
   const runtime: MutableRuntime = {
     sequence: 0,
     state: 'STARTING',
     currentOperationId: null,
     nextBackupAt: null,
     status: previousStatus,
-    findingCodes: [...(previousStatus.finding_codes ?? []), ...recoverInterruptedState(loaded.config.state_directory)]
+    findingCodes: [...(previousStatus.finding_codes ?? []), ...recoveryFindings]
   };
-  let heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+  let heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
   let stopping = false;
   const requestStop = (): void => {
     if (stopping) return;
@@ -229,25 +292,116 @@ export async function runService(loaded: LoadedConfig): Promise<void> {
     runtime.state = 'STOPPING';
     runtime.nextBackupAt = null;
     terminateActiveCommands();
-    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
   };
   process.once('SIGTERM', requestStop);
   process.once('SIGINT', requestStop);
-  let server: http.Server;
+  let server: http.Server | undefined;
+  let controlServer: ControlServerHandle | undefined;
   try {
     const dependencyCheck = await doctor(loaded.config);
     if (dependencyCheck.result !== 'PASS') {
       throw new BackupError('DEPENDENCY_UNAVAILABLE', 3, 'service dependency admission failed', 'preflight');
     }
     server = await startHealthServer(service, () => heartbeat);
+    const control = loaded.config.control;
+    if (control?.enabled) {
+      const enabledCommands = enabledControlCommands(loaded, control);
+      const commandCapabilities = enabledCommands.map((action) => action === 'backup' ? 'backup.run.v1' : `backup.${action}.v1`);
+      const executeControlCommand = async (command: LocalCommand, signal: AbortSignal): Promise<LocalCommandResult> => {
+        if (command.action === 'cancel') throw new BackupError('COMMAND_INVALID', 2, 'cancel commands are handled by command admission', 'control');
+        const startedAt = new Date().toISOString();
+        const terminate = (): void => terminateActiveCommands();
+        signal.addEventListener('abort', terminate, { once: true });
+        runtime.state = 'RUNNING'; runtime.currentOperationId = command.command_id;
+        heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
+        let operationId: string | null = command.command_id; let receiptCursor: string | null = null;
+        let state: LocalCommandResult['state'] = 'SUCCEEDED'; let code = 'COMMAND_SUCCEEDED';
+        try {
+          if (command.action === 'backup') {
+            const receipt = await runBackup(loaded, new Date(startedAt), 'control-plane', signal);
+            operationId = receipt.backup_set_id;
+            receiptCursor = evidenceStore.operation(operationId)?.cursor ?? null;
+            state = receipt.result === 'FAIL' ? 'FAILED' : 'SUCCEEDED'; code = `BACKUP_${receipt.result}`;
+          } else if (command.action === 'restore-test') {
+            const summary=await runRestoreTest(loaded,command.command_id,{targetId:String(command.payload.target_id),snapshotId:String(command.payload.snapshot_id)},signal);
+            receiptCursor=summary.cursor;operationId=summary.operation.operation_id;state=summary.result==='PASS'?'SUCCEEDED':summary.result==='CANCELLED'?'CANCELLED':'FAILED';code=summary.operation.code;
+          } else {
+            const targetId = command.payload.target_id;
+            const targets = targetId === null
+              ? loaded.config.targets
+              : loaded.config.targets.filter((target) => target.id === targetId);
+            if (targets.length === 0) throw new BackupError('TARGET_NOT_CONFIGURED', 2, 'configured target is required', 'control');
+            if (command.action === 'read-data-check' && command.payload.policy !== 'full') {
+              throw new BackupError('READ_DATA_POLICY_UNSUPPORTED', 2, 'configured read-data policy is required', 'control');
+            }
+            const release = acquireLock(loaded.config.state_directory, command.command_id);
+            const targetResults: Array<{ id: string; provider_class: 'filesystem' | 's3' | 'rclone'; required: boolean; result: 'PASS' | 'FAIL'; snapshot_id: null; verification: 'METADATA' | 'READ_DATA'; verified_at: string | null; code: string }> = [];
+            try {
+              for (const target of targets) {
+                try {
+                  if (command.action === 'repository-check') await checkRepository(target, loaded.config.tools);
+                  else await checkRepositoryReadData(target, loaded.config.tools);
+                  if (signal.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
+                  targetResults.push({ id: target.id, provider_class: target.type === 'filesystem' ? 'filesystem' : target.type === 's3' ? 's3' : 'rclone', required: target.required, result: 'PASS', snapshot_id: null, verification: command.action === 'repository-check' ? 'METADATA' : 'READ_DATA', verified_at: new Date().toISOString(), code: 'TARGET_CHECK_PASS' });
+                } catch {
+                  if (signal.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
+                  targetResults.push({ id: target.id, provider_class: target.type === 'filesystem' ? 'filesystem' : target.type === 's3' ? 's3' : 'rclone', required: target.required, result: 'FAIL', snapshot_id: null, verification: command.action === 'repository-check' ? 'METADATA' : 'READ_DATA', verified_at: null, code: 'TARGET_CHECK_FAIL' });
+                }
+              }
+            } finally { release(); }
+            const requiredFailed = targetResults.some((target) => target.required && target.result === 'FAIL');
+            const optionalFailed = targetResults.some((target) => !target.required && target.result === 'FAIL');
+            const summaryState = requiredFailed ? 'FAIL' : optionalFailed ? 'WARN' : 'PASS';
+            code = command.action === 'repository-check' ? `REPOSITORY_CHECK_${summaryState}` : `READ_DATA_CHECK_${summaryState}`;
+            const summary = evidenceStore.recordCommandOperation({ operationId: command.command_id, kind: command.action, commandId: command.command_id, state: summaryState, code, startedAt, completedAt: new Date().toISOString(), configSha256: loaded.sha256, image: imageIdentity(), targets: targetResults });
+            receiptCursor = summary.cursor; state = requiredFailed ? 'FAILED' : 'SUCCEEDED';
+          }
+        } catch (error) {
+          state = signal.aborted ? 'CANCELLED' : 'FAILED';
+          code = signal.aborted ? 'COMMAND_CANCELLED' : error instanceof BackupError ? error.code : 'COMMAND_FAILED';
+          if (signal.aborted && !receiptCursor) {
+            const summary = evidenceStore.recordCommandOperation({ operationId: command.command_id,
+              kind: command.action, commandId: command.command_id, state: 'CANCELLED', code,
+              startedAt, completedAt: new Date().toISOString(), configSha256: loaded.sha256,
+              image: imageIdentity(), targets: [] });
+            operationId = summary.operation.operation_id; receiptCursor = summary.cursor;
+          }
+        } finally {
+          signal.removeEventListener('abort', terminate);
+          runtime.currentOperationId = null; runtime.status = readStatus(loaded.config.state_directory);
+          runtime.state = state === 'SUCCEEDED' || state === 'CANCELLED' ? 'READY' : 'DEGRADED';
+          heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
+        }
+        return { schema: 'isy.backup.command-result/v1', command_id: command.command_id,
+          idempotency_key: command.idempotency_key, command_digest: command.command_digest,
+          state, code, operation_id: operationId, receipt_cursor: receiptCursor,
+          started_at: startedAt, completed_at: new Date().toISOString() };
+      };
+      const commandService = new ControlCommandService({
+        stateDirectory: loaded.config.state_directory, installationId: () => controlInstallationId(control),
+        configSha256: loaded.sha256, allowedCommands: enabledCommands,
+        capabilities: commandCapabilities, execute: executeControlCommand,
+      });
+      controlServer = await startControlServer({
+        socketPath: control.socket,
+        ownerUid: control.owner_uid,
+        groupGid: control.group_gid,
+        mode: control.mode,
+        maximumReceiptPageSize: control.max_receipt_page_size,
+        evidenceStore,
+        commandService,
+      });
+    }
   } catch (error) {
     process.removeListener('SIGTERM', requestStop);
     process.removeListener('SIGINT', requestStop);
+    if (server) await new Promise<void>((resolve) => server?.close(() => resolve()));
     releaseServiceLock();
     throw error;
   }
   const heartbeatTimer = setInterval(() => {
-    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
   }, service.heartbeat_interval_seconds * 1_000);
   heartbeatTimer.unref();
   try {
@@ -256,17 +410,17 @@ export async function runService(loaded: LoadedConfig): Promise<void> {
       ? Date.now()
       : Date.now() + service.backup_interval_seconds * 1_000;
     runtime.nextBackupAt = new Date(nextBackup).toISOString();
-    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+    heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
     while (!stopping) {
       await wait(nextBackup - Date.now(), () => stopping);
       if (stopping) break;
       runtime.state = 'RUNNING';
       runtime.currentOperationId = `scheduled-backup-${new Date().toISOString()}`;
       runtime.nextBackupAt = null;
-      heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+      heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
       let receipt: BackupReceipt | null = null;
       try {
-        receipt = await runBackup(loaded);
+        receipt = await runBackup(loaded, new Date(), 'schedule');
         runtime.status = readStatus(loaded.config.state_directory);
         runtime.findingCodes = receipt.findings.map((finding) => finding.code);
       } catch (error) {
@@ -277,7 +431,19 @@ export async function runService(loaded: LoadedConfig): Promise<void> {
       runtime.state = receipt?.result === 'PASS' && runtime.findingCodes.length === 0 ? 'READY' : 'DEGRADED';
       nextBackup = Date.now() + service.backup_interval_seconds * 1_000;
       runtime.nextBackupAt = new Date(nextBackup).toISOString();
-      heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime);
+      heartbeat = writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
+      if (loaded.config.restore_test?.enabled) {
+        const recent=evidenceStore.latestReceipt((item)=>item.operation.kind==='restore-test');
+        const last=recent?.operation.completed_at?Date.parse(recent.operation.completed_at):0;
+        if(Date.now()-last>=loaded.config.restore_test.interval_seconds*1000){
+          try{const result=await runRestoreTest(loaded);runtime.findingCodes=result.result==='PASS'
+            ?runtime.findingCodes.filter((code)=>code!=='RESTORE_TEST_FAILED')
+            :[...new Set([...runtime.findingCodes,result.operation.code])];}
+          catch(error){runtime.findingCodes=[...new Set([...runtime.findingCodes,error instanceof BackupError?error.code:'RESTORE_TEST_FAILED'])];}
+          runtime.state=runtime.findingCodes.length===0?'READY':'DEGRADED';
+          heartbeat=writeHeartbeat(loaded,runtimeInstanceId,runtime,evidenceStore);
+        }
+      }
     }
   } finally {
     stopping = true;
@@ -285,8 +451,9 @@ export async function runService(loaded: LoadedConfig): Promise<void> {
     runtime.state = 'STOPPING';
     runtime.currentOperationId = null;
     runtime.nextBackupAt = null;
-    writeHeartbeat(loaded, runtimeInstanceId, runtime);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    writeHeartbeat(loaded, runtimeInstanceId, runtime, evidenceStore);
+    if (controlServer) await controlServer.close();
+    if (server) await new Promise<void>((resolve) => server?.close(() => resolve()));
     process.removeListener('SIGTERM', requestStop);
     process.removeListener('SIGINT', requestStop);
     releaseServiceLock();

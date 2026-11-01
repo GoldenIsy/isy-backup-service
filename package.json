@@ -1,6 +1,6 @@
 {
   "name": "@goldenisy/isy-backup-service",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test",
+    "test:mutation": "stryker run",
     "test:contract": "node --test tests/contract/*.test.mjs",
     "test:unit": "npm run build && node --test tests/unit/*.test.mjs",
     "test:integration": "npm run build && node --test tests/integration/*.test.mjs"
@@ -21,6 +22,9 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/tap-runner": "^10.1.1",
+    "@stryker-mutator/typescript-checker": "^10.1.1",
     "@types/node": "22.18.6",
     "typescript": "5.9.3"
   }

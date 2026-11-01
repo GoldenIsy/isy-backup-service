@@ -18,16 +18,18 @@ export async function doctor(config: BackupConfig): Promise<DoctorResult> {
       checks.push({ name, result: 'FAIL', detail: 'not readable and writable' });
     }
   }
-  const tools = new Map<string, string>();
-  tools.set('restic', config.tools?.restic ?? 'restic');
+  const tools = new Map<string, { binary: string; args: string[] }>();
+  tools.set('restic', { binary: config.tools?.restic ?? 'restic', args: ['version'] });
   if (config.sources.some((source) => source.type === 'postgres')) {
-    tools.set('pg_dump', config.tools?.pg_dump ?? 'pg_dump');
-    tools.set('pg_restore', config.tools?.pg_restore ?? 'pg_restore');
+    tools.set('pg_dump', { binary: config.tools?.pg_dump ?? 'pg_dump', args: ['--version'] });
+    tools.set('pg_restore', { binary: config.tools?.pg_restore ?? 'pg_restore', args: ['--version'] });
   }
-  if (config.sources.some((source) => source.type === 's3')) tools.set('rclone', config.tools?.rclone ?? 'rclone');
-  for (const [name, binary] of tools) {
+  if (config.sources.some((source) => source.type === 's3')) {
+    tools.set('rclone', { binary: config.tools?.rclone ?? 'rclone', args: ['version'] });
+  }
+  for (const [name, { binary, args }] of tools) {
     try {
-      const result = await runCommand(binary, ['--version'], { timeoutMs: 10_000 });
+      const result = await runCommand(binary, args, { timeoutMs: 10_000 });
       checks.push({ name, result: result.exitCode === 0 ? 'PASS' : 'FAIL', detail: result.exitCode === 0 ? result.stdout.trim().slice(0, 200) : 'version command failed' });
     } catch {
       checks.push({ name, result: 'FAIL', detail: 'binary unavailable' });

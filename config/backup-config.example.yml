@@ -9,6 +9,20 @@ service:
   run_on_start: false
   listen_address: 0.0.0.0
   port: 8080
+control:
+  enabled: true
+  socket: /run/isy-backup/backup.sock
+  owner_uid: 1000
+  group_gid: 1001
+  mode: "0660"
+  installation_id_file: /run/isy-backup/installation-id
+  max_receipt_page_size: 100
+  allowed_commands:
+    - backup
+    - repository-check
+    - read-data-check
+    - restore-test
+    - cancel
 sources:
   - id: application-files
     type: filesystem
@@ -21,3 +35,8 @@ targets:
     repository: /backup/restic
     password_file: /run/secrets/restic-password
     cache_directory: /var/cache/isy-backup/local
+    retention:
+      keep_daily: 7
+      keep_weekly: 4
+      keep_monthly: 12
+      keep_yearly: 3

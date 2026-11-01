@@ -5,10 +5,11 @@ import { capturePostgres } from '../adapters/sources/postgres.js';
 import { captureS3 } from '../adapters/sources/s3.js';
 import { snapshot } from '../adapters/targets/restic.js';
 import type { LoadedConfig } from '../config/load.js';
-import { errorMessage } from '../domain/errors.js';
+import { BackupError, errorMessage } from '../domain/errors.js';
 import { createBackupSetId } from '../domain/identity.js';
 import { aggregateResult } from '../domain/results.js';
 import type { BackupReceipt, CapturedSource, Finding, SourceConfig, TargetResult } from '../domain/types.js';
+import { EvidenceStore } from '../evidence/store.js';
 import { ensurePrivateDirectory, writeJsonAtomic } from '../runtime/atomic.js';
 import { appendJournal } from '../runtime/journal.js';
 import { acquireLock } from '../runtime/lock.js';
@@ -25,10 +26,15 @@ async function captureSource(source: SourceConfig, directory: string, config: Lo
   return await captureS3(source, directory, config.config.tools);
 }
 
-export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise<BackupReceipt> {
+export async function runBackup(
+  loaded: LoadedConfig,
+  now = new Date(),
+  trigger: 'schedule' | 'local-manual' | 'control-plane' | 'recovery' = 'local-manual',
+  signal?: AbortSignal,
+): Promise<BackupReceipt> {
   const { config } = loaded;
-  const release = acquireLock(config.state_directory);
   const backupSetId = createBackupSetId(config.deployment, now);
+  const release = acquireLock(config.state_directory, backupSetId);
   const staging = path.join(config.staging_directory, backupSetId);
   const sources: CapturedSource[] = [];
   const targets: TargetResult[] = [];
@@ -36,12 +42,15 @@ export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise
   ensurePrivateDirectory(staging);
   appendJournal(config.state_directory, backupSetId, 'CREATED', now);
   try {
+    if (signal?.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
     appendJournal(config.state_directory, backupSetId, 'PREFLIGHT_PASSED');
     appendJournal(config.state_directory, backupSetId, 'CAPTURE_RUNNING');
     for (const source of config.sources) {
       try {
         sources.push(await captureSource(source, path.join(staging, 'sources', source.id), loaded));
+        if (signal?.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
       } catch (error) {
+        if (signal?.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
         const itemFinding = finding('SOURCE_CAPTURE_FAILED', 'capture', errorMessage(error), 'Inspect the source dependency and retained staging data.');
         findings.push(itemFinding);
         sources.push({ id: source.id, type: source.type, required: source.required, result: 'FAIL', artifact: null, sha256: null, bytes: 0, finding: itemFinding });
@@ -62,8 +71,10 @@ export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise
       appendJournal(config.state_directory, backupSetId, 'TARGETS_RUNNING');
       for (const target of config.targets) {
         try {
-          targets.push(await snapshot(target, config.tools ?? {}, staging, backupSetId));
+          targets.push(await snapshot(target, config.tools ?? {}, staging, backupSetId, config.deployment));
+          if (signal?.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
         } catch (error) {
+          if (signal?.aborted) throw new BackupError('COMMAND_CANCELLED', 7, 'backup operation was cancelled', 'control');
           const itemFinding = finding('TARGET_SNAPSHOT_FAILED', 'target', errorMessage(error), 'Inspect the target repository and retry only after the cause is resolved.');
           findings.push(itemFinding);
           targets.push({ id: target.id, type: target.type, required: target.required, result: 'FAIL', snapshot_id: null, verification: 'NONE', finding: itemFinding });
@@ -98,6 +109,7 @@ export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise
       try { previousStatus = JSON.parse(fs.readFileSync(statusFile, 'utf8')) as Record<string, unknown>; }
       catch { previousStatus = {}; }
     }
+    if (previousStatus.config_sha256 !== loaded.sha256) previousStatus = {};
     const requiredPassed = !sources.some((source) => source.required && source.result !== 'PASS')
       && !targets.some((target) => target.required && target.result !== 'PASS');
     const previousFreshness = typeof previousStatus.target_freshness === 'object' && previousStatus.target_freshness !== null
@@ -109,6 +121,7 @@ export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise
       schema: 'isy.backup.status/v1',
       deployment: config.deployment,
       environment: config.environment,
+      config_sha256: loaded.sha256,
       last_attempt_at: completedAt.toISOString(),
       last_success_at: result === 'PASS' ? completedAt.toISOString() : previousStatus.last_success_at ?? null,
       last_required_success_at: requiredPassed ? completedAt.toISOString() : previousStatus.last_required_success_at ?? null,
@@ -119,8 +132,12 @@ export async function runBackup(loaded: LoadedConfig, now = new Date()): Promise
       finding_codes: findings.map((item) => item.code)
     });
     appendJournal(config.state_directory, backupSetId, result, completedAt);
+    new EvidenceStore(config.state_directory).recordBackup(receipt, trigger);
     if (result !== 'FAIL') fs.rmSync(staging, { recursive: true, force: false });
     return receipt;
+  } catch (error) {
+    if (signal?.aborted) appendJournal(config.state_directory, backupSetId, 'CANCELLED');
+    throw error;
   } finally {
     release();
   }

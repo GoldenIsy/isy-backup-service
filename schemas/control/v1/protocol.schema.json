@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.isyreport.de/isy-backup/control/v1/protocol.schema.json",
+  "title": "Isy Backup Service local control protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/observation" },
+    { "$ref": "#/$defs/operationSummary" },
+    { "$ref": "#/$defs/receiptSummary" },
+    { "$ref": "#/$defs/receiptPage" },
+    { "$ref": "#/$defs/command" },
+    { "$ref": "#/$defs/commandAcknowledgement" },
+    { "$ref": "#/$defs/commandResult" }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nullableTimestamp": {
+      "anyOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prefixedDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "logicalId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "safeCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^backup\\.[a-z0-9.-]+\\.v[1-9][0-9]*$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "source_revision", "digest"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "source_revision": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "digest": {
+          "anyOf": [{ "$ref": "#/$defs/prefixedDigest" }, { "type": "null" }]
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "available_version", "available_digest"],
+      "properties": {
+        "state": { "enum": ["CURRENT", "AVAILABLE", "REQUIRED", "UNKNOWN"] },
+        "available_version": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+        "available_digest": {
+          "anyOf": [{ "$ref": "#/$defs/prefixedDigest" }, { "type": "null" }]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "installation_id", "deployment", "environment", "runtime_instance_id",
+        "sequence", "observed_at", "config_sha256", "image", "state",
+        "scheduler_responsive", "current_operation_id", "next_backup_at",
+        "last_attempt_at", "last_required_success_at", "target_freshness",
+        "finding_codes", "capabilities", "update"
+      ],
+      "properties": {
+        "schema": { "const": "isy.backup.observation/v1" },
+        "installation_id": { "$ref": "#/$defs/uuid" },
+        "deployment": { "$ref": "#/$defs/logicalId" },
+        "environment": { "$ref": "#/$defs/logicalId" },
+        "runtime_instance_id": { "$ref": "#/$defs/uuid" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "observed_at": { "$ref": "#/$defs/timestamp" },
+        "config_sha256": { "$ref": "#/$defs/digest" },
+        "image": { "$ref": "#/$defs/image" },
+        "state": { "enum": ["READY", "DEGRADED", "FAILED"] },
+        "scheduler_responsive": { "type": "boolean" },
+        "current_operation_id": {
+          "anyOf": [{ "$ref": "#/$defs/logicalId" }, { "type": "null" }]
+        },
+        "next_backup_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "last_attempt_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "last_required_success_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "target_freshness": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+          "additionalProperties": { "$ref": "#/$defs/timestamp" }
+        },
+        "finding_codes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/safeCode" }
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "update": { "$ref": "#/$defs/update" }
+      }
+    },
+    "operationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "operation_id", "kind", "trigger", "state", "code",
+        "command_id", "started_at", "completed_at", "config_sha256"
+      ],
+      "properties": {
+        "schema": { "const": "isy.backup.operation-summary/v1" },
+        "operation_id": { "$ref": "#/$defs/logicalId" },
+        "kind": { "enum": ["backup", "repository-check", "read-data-check", "restore-test", "retention"] },
+        "trigger": { "enum": ["schedule", "local-manual", "control-plane", "recovery"] },
+        "state": { "enum": ["QUEUED", "RUNNING", "PASS", "WARN", "FAIL", "CANCELLED", "UNKNOWN"] },
+        "code": { "$ref": "#/$defs/safeCode" },
+        "command_id": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "completed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "config_sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "sourceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required", "result", "bytes", "entries", "code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/logicalId" },
+        "type": { "enum": ["postgresql", "s3", "filesystem"] },
+        "required": { "type": "boolean" },
+        "result": { "enum": ["PASS", "WARN", "FAIL", "SKIPPED", "UNKNOWN"] },
+        "bytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "entries": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "code": { "$ref": "#/$defs/safeCode" }
+      }
+    },
+    "targetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider_class", "required", "result", "snapshot_id", "verification", "verified_at", "code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/logicalId" },
+        "provider_class": { "enum": ["filesystem", "s3", "rclone"] },
+        "required": { "type": "boolean" },
+        "result": { "enum": ["PASS", "WARN", "FAIL", "SKIPPED", "UNKNOWN"] },
+        "snapshot_id": {
+          "anyOf": [{ "$ref": "#/$defs/logicalId" }, { "type": "null" }]
+        },
+        "verification": { "enum": ["NONE", "METADATA", "READ_DATA", "RESTORE_TEST"] },
+        "verified_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "code": { "$ref": "#/$defs/safeCode" }
+      }
+    },
+    "receiptSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "cursor", "operation", "backup_set_id", "result", "image",
+        "sources", "targets", "finding_codes"
+      ],
+      "properties": {
+        "schema": { "const": "isy.backup.receipt-summary/v1" },
+        "cursor": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_-]+$" },
+        "operation": { "$ref": "#/$defs/operationSummary" },
+        "backup_set_id": { "$ref": "#/$defs/logicalId" },
+        "result": { "enum": ["PASS", "WARN", "FAIL", "CANCELLED", "UNKNOWN"] },
+        "image": { "$ref": "#/$defs/image" },
+        "sources": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/sourceResult" } },
+        "targets": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/targetResult" } },
+        "finding_codes": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/safeCode" } }
+      }
+    },
+    "receiptPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "after", "next", "receipts"],
+      "properties": {
+        "schema": { "const": "isy.backup.receipt-page/v1" },
+        "after": { "type": ["string", "null"], "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_-]+$" },
+        "next": { "type": ["string", "null"], "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_-]+$" },
+        "receipts": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/receiptSummary" } }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "command_id", "idempotency_key", "installation_id", "command_digest",
+        "action", "payload", "expected_config_sha256", "required_capability", "issued_at", "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "isy.backup.command/v1" },
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "idempotency_key": { "$ref": "#/$defs/uuid" },
+        "installation_id": { "$ref": "#/$defs/uuid" },
+        "command_digest": { "$ref": "#/$defs/prefixedDigest" },
+        "action": { "enum": ["backup", "repository-check", "read-data-check", "restore-test", "cancel"] },
+        "payload": { "type": "object", "maxProperties": 2 },
+        "expected_config_sha256": { "$ref": "#/$defs/digest" },
+        "required_capability": { "$ref": "#/$defs/capability" },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "backup" } }, "required": ["action"] },
+          "then": { "properties": { "payload": { "type": "object", "additionalProperties": false, "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "repository-check" } }, "required": ["action"] },
+          "then": { "properties": { "payload": { "type": "object", "additionalProperties": false, "required": ["target_id"], "properties": { "target_id": { "anyOf": [{ "$ref": "#/$defs/logicalId" }, { "type": "null" }] } } } } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "read-data-check" } }, "required": ["action"] },
+          "then": { "properties": { "payload": { "type": "object", "additionalProperties": false, "required": ["target_id", "policy"], "properties": { "target_id": { "$ref": "#/$defs/logicalId" }, "policy": { "$ref": "#/$defs/logicalId" } } } } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "restore-test" } }, "required": ["action"] },
+          "then": { "properties": { "payload": { "type": "object", "additionalProperties": false, "required": ["target_id", "snapshot_id"], "properties": { "target_id": { "$ref": "#/$defs/logicalId" }, "snapshot_id": { "$ref": "#/$defs/logicalId" } } } } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "cancel" } }, "required": ["action"] },
+          "then": { "properties": { "payload": { "type": "object", "additionalProperties": false, "required": ["operation_id"], "properties": { "operation_id": { "$ref": "#/$defs/logicalId" } } } } }
+        }
+      ]
+    },
+    "commandAcknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "command_id", "idempotency_key", "command_digest", "state", "code", "acknowledged_at"],
+      "properties": {
+        "schema": { "const": "isy.backup.command-acknowledgement/v1" },
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "idempotency_key": { "$ref": "#/$defs/uuid" },
+        "command_digest": { "$ref": "#/$defs/prefixedDigest" },
+        "state": { "enum": ["ACCEPTED", "REJECTED"] },
+        "code": { "$ref": "#/$defs/safeCode" },
+        "acknowledged_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "commandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "command_id", "idempotency_key", "command_digest", "state", "code", "operation_id", "receipt_cursor", "started_at", "completed_at"],
+      "properties": {
+        "schema": { "const": "isy.backup.command-result/v1" },
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "idempotency_key": { "$ref": "#/$defs/uuid" },
+        "command_digest": { "$ref": "#/$defs/prefixedDigest" },
+        "state": { "enum": ["SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN"] },
+        "code": { "$ref": "#/$defs/safeCode" },
+        "operation_id": { "anyOf": [{ "$ref": "#/$defs/logicalId" }, { "type": "null" }] },
+        "receipt_cursor": { "type": ["string", "null"], "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_-]+$" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "completed_at": { "$ref": "#/$defs/timestamp" }
+      }
+    }
+  }
+}

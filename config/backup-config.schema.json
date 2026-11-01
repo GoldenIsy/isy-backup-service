@@ -19,6 +19,7 @@
         "rclone": { "type": "string", "minLength": 1 },
         "pg_dump": { "type": "string", "minLength": 1 },
         "pg_restore": { "type": "string", "minLength": 1 }
+        ,"psql": { "type": "string", "minLength": 1 }
       }
     },
     "service": {
@@ -31,6 +32,50 @@
         "run_on_start": { "type": "boolean" },
         "listen_address": { "enum": ["127.0.0.1", "0.0.0.0"] },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "socket", "owner_uid", "group_gid", "mode", "max_receipt_page_size"],
+      "oneOf": [
+        { "properties": { "installation_id": {} }, "required": ["installation_id"] },
+        { "properties": { "installation_id_file": {} }, "required": ["installation_id_file"] }
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "socket": { "$ref": "#/$defs/absolutePath" },
+        "owner_uid": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "group_gid": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "mode": { "type": "string", "pattern": "^0(?:6[04]0|660)$" },
+        "installation_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+        "installation_id_file": { "$ref": "#/$defs/absolutePath" },
+        "max_receipt_page_size": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "allowed_commands": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 5,
+          "items": { "enum": ["backup", "repository-check", "read-data-check", "restore-test", "cancel"] }
+        }
+      }
+    },
+    "restore_test": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "directory", "interval_seconds", "target_id"],
+      "properties": {
+        "enabled": { "type": "boolean" }, "directory": { "$ref": "#/$defs/absolutePath" },
+        "interval_seconds": { "type": "integer", "minimum": 3600, "maximum": 2678400 },
+        "target_id": { "$ref": "#/$defs/id" },
+        "postgres_verifier": {
+          "type": "object", "additionalProperties": false,
+          "required": ["host","port","username","password_file","maintenance_database","database_prefix"],
+          "properties": {
+            "host": { "type": "string", "minLength": 1, "maxLength": 253 }, "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "username": { "type": "string", "minLength": 1, "maxLength": 128 }, "password_file": { "$ref": "#/$defs/absolutePath" },
+            "maintenance_database": { "type": "string", "minLength": 1, "maxLength": 63 },
+            "database_prefix": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" }
+          }
+        }
       }
     },
     "sources": {
@@ -108,6 +153,20 @@
         "repository": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "password_file": { "$ref": "#/$defs/absolutePath" },
         "cache_directory": { "$ref": "#/$defs/absolutePath" },
+        "verification": { "enum": ["metadata", "read-data"], "default": "metadata" },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "keep_hourly": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "keep_daily": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "keep_weekly": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "keep_monthly": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "keep_yearly": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "keep_within": { "type": "string", "pattern": "^[1-9][0-9]*(?:h|d|m|y)$" }
+          }
+        },
         "environment_secret_files": {
           "type": "object",
           "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },

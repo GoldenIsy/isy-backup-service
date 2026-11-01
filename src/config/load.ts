@@ -85,6 +85,15 @@ function validateSemantics(config: BackupConfig): void {
       }
     }
   }
+  if (config.restore_test?.enabled) {
+    if (!config.targets.some((target) => target.id === config.restore_test?.target_id)) throw new BackupError('CONFIG_INVALID', 2, 'restore_test target_id is not configured', 'config');
+    assertSeparate(config.restore_test.directory, config.state_directory, 'restore_test directory and state_directory');
+    assertSeparate(config.restore_test.directory, config.staging_directory, 'restore_test directory and staging_directory');
+    for (const source of config.sources) if (source.type === 'filesystem') assertSeparate(config.restore_test.directory, source.root, `restore_test directory and source ${source.id}`);
+    for (const target of config.targets) if (target.type === 'filesystem') assertSeparate(config.restore_test.directory, target.repository, `restore_test directory and target ${target.id}`);
+    if (config.sources.some((source) => source.type === 'postgres') && !config.restore_test.postgres_verifier) throw new BackupError('CONFIG_INVALID', 2, 'PostgreSQL restore tests require an isolated verifier', 'config');
+    if (config.restore_test.postgres_verifier) validateSecretFile(config.restore_test.postgres_verifier.password_file, 'restore_test.postgres_verifier.password_file');
+  }
 }
 
 export function loadConfig(configPath: string): LoadedConfig {

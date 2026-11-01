@@ -10,7 +10,10 @@ The authorities are:
 - [`IMPLEMENTATION_CONTRACT.md`](IMPLEMENTATION_CONTRACT.md): concrete runtime
   architecture, interfaces, schemas, workflows, and rollout;
 - [`TESTING_CONTRACT.md`](TESTING_CONTRACT.md): risk-based test inventory,
-  evidence rules, failure injection, and qualification gates.
+  evidence rules, failure injection, and qualification gates;
+- [`docs/SAAS_CONTROL_PLANE_INTEGRATION.md`](docs/SAAS_CONTROL_PLANE_INTEGRATION.md):
+  credential-free local installation-agent interface, observations, command
+  admission, offline behavior, security boundary, required changes, and tests.
 
 ## Current status
 
@@ -18,20 +21,36 @@ The repository now contains a tested long-running runtime and one-shot command
 surface. It can
 validate configuration, diagnose dependencies, capture filesystem,
 PostgreSQL, and MinIO/S3 data, create and check Restic snapshots, list
-snapshots, and restore a snapshot into an isolated directory. `serve` schedules
+snapshots, apply explicit policy-driven retention with a separate receipt, and
+restore a snapshot into an isolated directory. `serve` schedules
 recurring backups, publishes an independent heartbeat, exposes private
 liveness/readiness/status endpoints, recovers interrupted journal state, and
 handles orderly container shutdown.
 
-It is not yet a production backup authority. The external heartbeat parent,
-Slack bridge integration, retention,
-automatic restore tests, and live provider qualification remain open. Existing
-IsyReport and IsyDocs backup paths remain active until the contract's migration
-gates are completed.
+Every completed backup also publishes an immutable, allowlisted operation
+summary under the private state directory. The local evidence store provides
+stable bounded cursors, restart-safe runtime/observation sequencing, atomic
+current observations, and retention guards for the latest required success,
+latest restore-test proof, and unresolved failure. When `control.enabled` is
+true, an owner/group-restricted Unix socket exposes only bounded status,
+observation, receipt-history, and operation-detail GET routes. It never copies artifact
+paths, repository locations, provider output, finding details, or credentials
+into control-plane evidence. Explicitly allowlisted backup, repository-check,
+read-data-check, isolated restore-test, and bounded cancellation commands use the same socket and are
+durably admitted before execution.
+
+The runtime carries PostgreSQL 16 client tools. PostgreSQL sources must use
+major version 16 so capture never relies on an older `pg_dump` than the server.
+
+The IsyDocs development deployment is the first qualified pilot. Production
+activation and retirement of incumbent backup paths remain separate rollout
+decisions.
 
 The intended delivery is one versioned OCI image deployed as a separate
 instance in each application stack. Every instance has its own configuration,
 credentials, repositories, cache, receipts, and monitoring identity.
+The image also exports its complete Compose/config/credential-helper bundle, so
+an on-premise host does not need source-repository access.
 
 Planned instances include:
 
@@ -91,6 +110,7 @@ repository-scoped token and does not require a personal Git password or token.
 
 ```text
 isy-backup version
+isy-backup deployment export --output /empty/deployment/directory
 isy-backup serve --config /absolute/config.yml
 isy-backup config validate --config /absolute/config.yml
 isy-backup doctor --config /absolute/config.yml
@@ -100,13 +120,46 @@ isy-backup check --config /absolute/config.yml --target <id>
 isy-backup snapshots --config /absolute/config.yml --target <id>
 isy-backup restore --config /absolute/config.yml --target <id> \
   --snapshot <id> --output /new/isolated/path
+isy-backup restore-test --config /absolute/config.yml
+isy-backup forget --config /absolute/config.yml --target <id> \
+  --snapshot <id> --confirm-delete <same-id>
+isy-backup retention --config /absolute/config.yml --target <id>
 isy-backup status --config /absolute/config.yml
 isy-backup status --healthcheck --config /absolute/config.yml
 ```
 
+## Read-only installation-agent socket
+
+The optional local interface is disabled unless this strict configuration is
+present with `enabled: true`:
+
+```yaml
+control:
+  enabled: true
+  socket: /run/isy-backup/control.sock
+  owner_uid: 1000
+  group_gid: 1001
+  mode: "0660"
+  installation_id_file: /run/isy-backup/installation-id
+  allowed_commands: [backup, repository-check, read-data-check, restore-test, cancel]
+  max_receipt_page_size: 100
+```
+
+The socket supports `GET /v1/status`,
+`GET /v1/observations/current`, bounded `GET /v1/receipts`, and
+`GET /v1/operations/{operation_id}`, plus the four allowlisted command POST
+routes. The installation ID may be fixed or read from the shared public
+identity file written after agent enrollment. Unknown routes fail closed.
+[`compose.example.yml`](compose.example.yml) initializes and
+shares only `/run/isy-backup`; it does not share the Docker socket or publish a
+port. The installation-agent container joins supplemental group `1001` and
+mounts the same named volume.
+
 Repository initialization is deliberately separate from scheduled/manual
 backup. Restore refuses output paths that overlap sources, state, staging, or
-filesystem repositories.
+filesystem repositories. Snapshot deletion requires the same immutable ID
+twice and runs Restic `forget --prune`; provider files must never be deleted
+manually because doing so can corrupt the repository.
 
 ## pCloud configuration
 
@@ -116,10 +169,31 @@ The dedicated account's rclone configuration and the independent Restic
 repository password are mounted as owner-only files. `RCLONE_CONFIG` receives
 the config path, never the OAuth token as a command argument.
 
-This wiring has deterministic adapter coverage, but it is not live-qualified
-against the customer or company pCloud account yet.
+The IsyDocs development flow was first qualified on 2026-10-31 with a
+disposable pCloud repository. On 2026-11-01 it was cut over to the dedicated
+EU account and the company-owned shared folder visible to that account as
+`IsyDocs-backup`. The live qualification proved EU-only OAuth identity,
+shared-folder write/read/delete access, initialization, encrypted dual-target
+backup, Restic check, isolated restore, PostgreSQL archive parsing, and guarded
+`forget --prune`. The retained development repository is below
+`IsyDocs-backup/testing/dev-isydocs/restic`.
+
+Restic snapshots must be removed with the guarded `forget` command, never by
+deleting repository files in pCloud. rclone file deletion works with OAuth and
+pCloud moves deleted provider objects through its Trash lifecycle. Emptying
+Trash through rclone is a separate pCloud API limitation that requires storing
+the account username/password; this deployment intentionally does not do so.
 
 ## Validation
+
+Targets may set `verification: read-data` to run `restic check --read-data`
+after every snapshot. This is stronger and more expensive than the default
+metadata check; use it when a run must prove remote pack readability.
+
+Run `npm run test:mutation` for the focused mutation gate over result
+aggregation, restore guards, mutation locking, and secret redaction. The
+initial enforced floor is 60%; raise it only after killing meaningful
+survivors rather than excluding difficult production branches.
 
 Install exact locked dependencies and run the checks with:
 

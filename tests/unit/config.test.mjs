@@ -62,3 +62,28 @@ test('configuration identity is stable across YAML key ordering', () => {
     assert.equal(loadConfig(reordered).sha256, firstHash);
   } finally { value.cleanup(); }
 });
+
+test('read-only control configuration is explicit, bounded, and contains no remote credential', () => {
+  const value = fixture();
+  try {
+    const control = {
+      enabled: true,
+      socket: path.join(value.root, 'control.sock'),
+      owner_uid: 1000,
+      group_gid: 1001,
+      mode: '0660',
+      installation_id: '11111111-1111-4111-8111-111111111111',
+      max_receipt_page_size: 25
+    };
+    assert.deepEqual(loadConfig(writeConfig(value, { control })).config.control, control);
+    for (const invalid of [
+      { ...control, socket: 'relative.sock' },
+      { ...control, mode: '0666' },
+      { ...control, installation_id: 'not-an-installation' },
+      { ...control, max_receipt_page_size: 101 },
+      { ...control, token: 'forbidden' }
+    ]) {
+      assert.throws(() => loadConfig(writeConfig(value, { control: invalid })), /configuration schema rejected/u);
+    }
+  } finally { value.cleanup(); }
+});

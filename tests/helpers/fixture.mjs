@@ -60,16 +60,18 @@ export function fakeRestic(fixtureValue) {
   return executable(fixtureValue.root, 'fake-restic', `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const repo = args[args.indexOf('--repo') + 1];
-const operation = args.find((arg) => ['init', 'backup', 'check', 'snapshots', 'restore'].includes(arg));
+const operation = args.find((arg) => ['init', 'backup', 'check', 'snapshots', 'restore', 'forget'].includes(arg));
 if (repo.includes('fail') && operation === 'backup') {
   process.stderr.write('token=' + String(process.env.TEST_PROVIDER_TOKEN) + '\\n');
   process.exit(17);
 }
 if (operation === 'backup') process.stdout.write(JSON.stringify({message_type:'summary', snapshot_id:'0123456789abcdef'}) + '\\n');
 if (operation === 'snapshots') process.stdout.write(JSON.stringify([{id:'0123456789abcdef'}]) + '\\n');
+if (operation === 'check') require('node:fs').writeFileSync('${fixtureValue.root}/check-arguments', args.join('\\n'));
 if (operation === 'restore') {
   const output = args[args.indexOf('--target') + 1];
   require('node:fs').writeFileSync(require('node:path').join(output, 'restored'), 'ok');
 }
+if (operation === 'forget') require('node:fs').writeFileSync('${fixtureValue.root}/forgotten-snapshot', args.join('\\n'));
 `);
 }

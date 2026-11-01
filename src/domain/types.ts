@@ -5,6 +5,7 @@ export interface ToolConfig {
   rclone?: string;
   pg_dump?: string;
   pg_restore?: string;
+  psql?: string;
 }
 
 export interface ServiceConfig {
@@ -13,6 +14,18 @@ export interface ServiceConfig {
   run_on_start: boolean;
   listen_address: '127.0.0.1' | '0.0.0.0';
   port: number;
+}
+
+export interface ControlConfig {
+  enabled: boolean;
+  socket: string;
+  owner_uid: number;
+  group_gid: number;
+  mode: string;
+  installation_id?: string;
+  installation_id_file?: string;
+  max_receipt_page_size: number;
+  allowed_commands?: Array<'backup' | 'repository-check' | 'read-data-check' | 'restore-test' | 'cancel'>;
 }
 
 export interface CommonSourceConfig {
@@ -43,6 +56,15 @@ export interface S3SourceConfig extends CommonSourceConfig {
 export type SourceConfig = FilesystemSourceConfig | PostgresSourceConfig | S3SourceConfig;
 export type TargetType = 'filesystem' | 'sftp' | 's3' | 'rest-server' | 'rclone';
 
+export interface RetentionPolicy {
+  keep_hourly?: number;
+  keep_daily?: number;
+  keep_weekly?: number;
+  keep_monthly?: number;
+  keep_yearly?: number;
+  keep_within?: string;
+}
+
 export interface TargetConfig {
   id: string;
   type: TargetType;
@@ -50,6 +72,8 @@ export interface TargetConfig {
   repository: string;
   password_file: string;
   cache_directory: string;
+  verification?: 'metadata' | 'read-data';
+  retention?: RetentionPolicy;
   environment_secret_files?: Record<string, string>;
   environment_file_references?: Record<string, string>;
 }
@@ -62,6 +86,11 @@ export interface BackupConfig {
   staging_directory: string;
   tools?: ToolConfig;
   service?: ServiceConfig;
+  control?: ControlConfig;
+  restore_test?: {
+    enabled: boolean; directory: string; interval_seconds: number; target_id: string;
+    postgres_verifier?: { host: string; port: number; username: string; password_file: string; maintenance_database: string; database_prefix: string };
+  };
   sources: SourceConfig[];
   targets: TargetConfig[];
 }
@@ -120,7 +149,7 @@ export interface TargetResult {
   required: boolean;
   result: Result;
   snapshot_id: string | null;
-  verification: 'RESTIC_CHECK' | 'NONE';
+  verification: 'RESTIC_CHECK' | 'RESTIC_READ_DATA' | 'NONE';
   finding?: Finding;
 }
 
@@ -138,4 +167,20 @@ export interface BackupReceipt {
   sources: CapturedSource[];
   targets: TargetResult[];
   findings: Finding[];
+}
+
+export interface RetentionReceipt {
+  schema: 'isy.backup.retention-receipt/v1';
+  operation: 'retention';
+  operation_id: string;
+  deployment: string;
+  environment: string;
+  target: string;
+  result: 'PASS' | 'FAIL';
+  code: string;
+  started_at: string;
+  completed_at: string;
+  config_sha256: string;
+  image: ImageIdentity;
+  policy: RetentionPolicy;
 }

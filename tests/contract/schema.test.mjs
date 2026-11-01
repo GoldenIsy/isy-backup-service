@@ -73,3 +73,29 @@ test('heartbeat schema binds scheduler state without equating liveness to freshn
   assert.equal(validate({ ...heartbeat, last_success_at: heartbeat.observed_at, scheduler_responsive: false }), true);
   assert.equal(validate({ ...heartbeat, secret: 'forbidden' }), false);
 });
+
+test('status schema binds freshness history to one configuration identity', () => {
+  const receiptSchema = JSON.parse(fs.readFileSync(new URL('../../schemas/receipt.schema.json', import.meta.url), 'utf8'));
+  const schema = JSON.parse(fs.readFileSync(new URL('../../schemas/status.schema.json', import.meta.url), 'utf8'));
+  const statusAjv = new Ajv2020({ allErrors: true, strict: true });
+  statusAjv.addFormat('date-time', { type: 'string', validate: (value) => !Number.isNaN(Date.parse(value)) });
+  statusAjv.addSchema(receiptSchema);
+  const validate = statusAjv.compile(schema);
+  const status = {
+    schema: 'isy.backup.status/v1',
+    deployment: 'devdocs',
+    environment: 'development',
+    config_sha256: 'a'.repeat(64),
+    last_attempt_at: '2026-10-31T10:00:00.000Z',
+    last_success_at: null,
+    last_required_success_at: null,
+    target_freshness: {},
+    result: 'FAIL',
+    backup_set_id: 'devdocs-20261031T100000.000Z-test',
+    image: { version: '0.2.0', source_revision: 'development', digest: null },
+    finding_codes: ['TARGET_SNAPSHOT_FAILED']
+  };
+  assert.equal(validate(status), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...status, config_sha256: undefined }), false);
+  assert.equal(validate({ ...status, secret: 'forbidden' }), false);
+});
