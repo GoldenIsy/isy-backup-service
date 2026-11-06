@@ -39,8 +39,8 @@ async function verifyPostgres(loaded:LoadedConfig,dump:string,database:string):P
   const create=await runCommand(psql,[...common,'--dbname',verifier.maintenance_database,'--set','ON_ERROR_STOP=1','--command',`CREATE DATABASE "${database}"`],{env,timeoutMs:5*60_000});
   if(create.exitCode!==0)throw new BackupError('RESTORE_TEST_DATABASE_CREATE_FAILED',6,'isolated verification database could not be created','restore-test');
   const pgRestore=loaded.config.tools?.pg_restore??'pg_restore';
-  const restoreSection=async(section:'pre-data'|'data'|'post-data'):Promise<void>=>{
-    const restore=await runCommand(pgRestore,[...common,'--dbname',database,'--exit-on-error','--no-owner','--no-privileges','--section',section,dump],{env,timeoutMs:60*60_000});
+  const restoreSection=async(section:'pre-data'|'data'|'post-data',extra:string[]=[]):Promise<void>=>{
+    const restore=await runCommand(pgRestore,[...common,'--dbname',database,'--exit-on-error','--no-owner','--no-privileges','--section',section,...extra,dump],{env,timeoutMs:60*60_000});
     if(restore.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,`PostgreSQL ${section} restore into verifier failed`,'restore-test');
   };
   await restoreSection('pre-data');
@@ -51,13 +51,19 @@ async function verifyPostgres(loaded:LoadedConfig,dump:string,database:string):P
         SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS arguments
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public'
+          AND p.proowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
       LOOP
         EXECUTE format('ALTER FUNCTION %I.%I(%s) SET search_path TO public, pg_catalog', item.nspname, item.proname, item.arguments);
       END LOOP;
     END $$`],{env,timeoutMs:5*60_000});
   if(functionSearchPath.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,'PostgreSQL verifier function search path could not be hardened','restore-test');
   await restoreSection('data');
-  await restoreSection('post-data');
+  const restoreList=path.join(path.dirname(dump),`.restore-test-${database}.toc`);
+  const list=await runCommand(pgRestore,['--list','--file',restoreList,dump],{env,timeoutMs:5*60_000});
+  if(list.exitCode!==0)throw new BackupError('RESTORE_TEST_POSTGRES_FAILED',6,'PostgreSQL archive table of contents could not be read','restore-test');
+  const filtered=fs.readFileSync(restoreList,'utf8').split('\n').filter((line)=>!/\sEVENT TRIGGER\s/u.test(line)).join('\n');
+  fs.writeFileSync(restoreList,filtered,{encoding:'utf8',mode:0o600});
+  try{await restoreSection('post-data',['--use-list',restoreList]);}finally{fs.rmSync(restoreList,{force:true});}
   const query=await runCommand(psql,[...common,'--dbname',database,'--tuples-only','--set','ON_ERROR_STOP=1','--command',"SELECT count(*) FROM pg_catalog.pg_class WHERE relkind IN ('r','p')"],{env,timeoutMs:5*60_000});
   if(query.exitCode!==0||!/^\s*[0-9]+\s*$/u.test(query.stdout))throw new BackupError('RESTORE_TEST_POSTGRES_INVARIANT_FAILED',6,'PostgreSQL restore invariant failed','restore-test');
 }

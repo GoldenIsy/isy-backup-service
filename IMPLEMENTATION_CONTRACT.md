@@ -402,6 +402,13 @@ Metadata checks run independently per repository. Data checks use a rotating
 subset so the complete repository is covered within a bounded cycle. The cycle
 position advances only after a passing check.
 
+After `restic backup`, the target adapter resolves the immutable snapshot from
+repository state using the run's unique backup-set tag. It requires exactly one
+match. A snapshot ID in Restic's bounded command output is cross-checked when
+present; an abbreviated ID is accepted only as a unique prefix of the full
+repository ID. Receipts store the full ID. This keeps verbose progress output
+or output truncation from discarding snapshot identity evidence.
+
 ### 9.2 Readback
 
 Readback reads actual encrypted repository data through the configured provider
@@ -421,6 +428,13 @@ cannot satisfy readback.
 
 Automated restore tests cannot point at production database names, buckets,
 prefixes, or filesystem roots.
+
+The automated PostgreSQL verifier does not receive superuser credentials. It
+parses the archive's complete table of contents and restores ordinary schema,
+data, indexes, and constraints. Event-trigger entries are retained in the
+archive but omitted from execution in the disposable verifier because
+PostgreSQL reserves their creation for superusers. A full disaster restore uses
+the database administrator and restores those privileged entries.
 
 ## 10. Local state and naming
 

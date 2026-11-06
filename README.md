@@ -41,6 +41,12 @@ durably admitted before execution.
 
 The runtime carries PostgreSQL 16 client tools. PostgreSQL sources must use
 major version 16 so capture never relies on an older `pg_dump` than the server.
+Large Restic runs resolve snapshot identity from the repository's unique
+backup-set tag instead of relying only on bounded progress output. Automated
+PostgreSQL restore tests remain non-superuser: they validate the complete
+archive table of contents and restore ordinary schema/data/constraints while
+leaving event-trigger creation to the documented administrator-led disaster
+restore.
 
 The IsyDocs development deployment was the first qualified pilot. IsyDocs
 production activated the digest-pinned service on 2026-11-01 after dual-target

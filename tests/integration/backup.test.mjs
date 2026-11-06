@@ -49,6 +49,31 @@ test('read-data verification downloads and authenticates repository pack data', 
   } finally { value.cleanup(); }
 });
 
+test('snapshot identity is recovered from the repository when verbose Restic output exceeds the capture limit', async () => {
+  const value = fixture();
+  try {
+    fs.writeFileSync(path.join(value.source, 'document.txt'), 'recoverable content');
+    const restic = executable(value.root, 'verbose-restic', `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const operation = args.find((arg) => ['backup','check','snapshots'].includes(arg));
+if (operation === 'backup') {
+  for (let index = 0; index < 2000; index += 1) {
+    process.stdout.write(JSON.stringify({message_type:'status',current_files:['document-' + index]}) + '\\n');
+  }
+  process.stdout.write(JSON.stringify({message_type:'summary',snapshot_id:'abcdef0123456789'}) + '\\n');
+}
+if (operation === 'snapshots') {
+  const tag = args[args.indexOf('--tag') + 1];
+  if (!tag?.startsWith('isy-backup-set:')) process.exit(19);
+  process.stdout.write(JSON.stringify([{id:'abcdef0123456789',tags:[tag]}]) + '\\n');
+}
+`);
+    const receipt = await runBackup(loadConfig(writeConfig(value, { tools: { restic } })));
+    assert.equal(receipt.result, 'PASS');
+    assert.equal(receipt.targets[0].snapshot_id, 'abcdef0123456789');
+  } finally { value.cleanup(); }
+});
+
 test('DST-002 optional target failure returns WARN, keeps required proof, and redacts diagnostics', async () => {
   const value = fixture();
   try {
@@ -140,8 +165,12 @@ test('pCloud wiring gives Restic only the rclone config path and a separate repo
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(environmentLog)}, JSON.stringify({args, rcloneConfig:process.env.RCLONE_CONFIG, passwordFile:process.env.RESTIC_PASSWORD_FILE}));
-const operation = args.find((arg) => ['backup','check'].includes(arg));
-if (operation === 'backup') process.stdout.write(JSON.stringify({message_type:'summary',snapshot_id:'fedcba9876543210'}) + '\\n');
+const operation = args.find((arg) => ['backup','check','snapshots'].includes(arg));
+if (operation === 'backup') process.stdout.write(JSON.stringify({message_type:'summary',snapshot_id:'fedcba98'}) + '\\n');
+if (operation === 'snapshots') {
+  const tag = args[args.indexOf('--tag') + 1];
+  process.stdout.write(JSON.stringify([{id:'fedcba98765432100123456789abcdef',tags:[tag]}]) + '\\n');
+}
 `);
     const targets = [{
       id: 'pcloud-eu', type: 'rclone', required: true,
@@ -152,6 +181,7 @@ if (operation === 'backup') process.stdout.write(JSON.stringify({message_type:'s
     }];
     const receipt = await runBackup(loadConfig(writeConfig(value, { tools: { restic }, targets })));
     assert.equal(receipt.result, 'PASS');
+    assert.equal(receipt.targets[0].snapshot_id, 'fedcba98765432100123456789abcdef');
     const invocation = JSON.parse(fs.readFileSync(environmentLog, 'utf8'));
     assert.equal(invocation.rcloneConfig, rcloneConfig);
     assert.equal(invocation.passwordFile, value.password);

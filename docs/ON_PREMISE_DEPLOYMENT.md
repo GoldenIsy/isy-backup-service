@@ -46,10 +46,10 @@ internet access or the Docker socket.
 No registry login is required:
 
 ```bash
-docker pull ghcr.io/goldenisy/isy-backup-agent:0.3.0
+docker pull ghcr.io/goldenisy/isy-backup-agent:0.3.1
 docker run --rm --read-only --cap-drop ALL \
   --security-opt no-new-privileges \
-  ghcr.io/goldenisy/isy-backup-agent:0.3.0 version
+  ghcr.io/goldenisy/isy-backup-agent:0.3.1 version
 ```
 
 The installation-agent image is selected by immutable digest through

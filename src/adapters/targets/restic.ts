@@ -60,18 +60,39 @@ export async function initializeRepository(target: TargetConfig, tools: ToolConf
 }
 
 export async function snapshot(target: TargetConfig, tools: ToolConfig, stagingDirectory: string, backupSetId: string, deployment: string): Promise<TargetResult> {
-  const backup = await execute(target, tools, ['backup', stagingDirectory, '--json', '--host', deployment, '--tag', `isy-backup-set:${backupSetId}`]);
+  const backupTag = `isy-backup-set:${backupSetId}`;
+  const backup = await execute(target, tools, ['backup', stagingDirectory, '--json', '--quiet', '--host', deployment, '--tag', backupTag]);
   assertPassed(backup, 'TARGET_SNAPSHOT_FAILED', 5, `target ${target.id} snapshot`);
-  let snapshotId: string | null = null;
+  let reportedSnapshotId: string | null = null;
   for (const line of backup.stdout.split('\n')) {
     try {
       const message = JSON.parse(line) as { message_type?: string; snapshot_id?: string };
-      if (message.message_type === 'summary' && typeof message.snapshot_id === 'string') snapshotId = message.snapshot_id;
+      if (message.message_type === 'summary' && typeof message.snapshot_id === 'string') reportedSnapshotId = message.snapshot_id;
     } catch {
       // Restic may emit non-JSON progress on some versions; the exit status remains authoritative.
     }
   }
-  if (!snapshotId) throw new BackupError('TARGET_RECEIPT_INVALID', 5, `target ${target.id} did not report a snapshot identity`, 'target');
+  const snapshots = await execute(target, tools, ['snapshots', '--json', '--host', deployment, '--tag', backupTag, '--latest', '2'], 5 * 60_000);
+  assertPassed(snapshots, 'TARGET_RECEIPT_INVALID', 5, `target ${target.id} snapshot identity lookup`);
+  let matchingIds: string[] = [];
+  try {
+    const records = JSON.parse(snapshots.stdout) as Array<{ id?: unknown; tags?: unknown }>;
+    if (Array.isArray(records)) {
+      matchingIds = records
+        .filter((record) => Array.isArray(record.tags) && record.tags.includes(backupTag))
+        .map((record) => record.id)
+        .filter((id): id is string => typeof id === 'string' && /^[a-f0-9]{8,64}$/u.test(id));
+    }
+  } catch {
+    matchingIds = [];
+  }
+  if (matchingIds.length !== 1) {
+    throw new BackupError('TARGET_RECEIPT_INVALID', 5, `target ${target.id} repository did not contain exactly one tagged snapshot identity`, 'target');
+  }
+  const snapshotId = matchingIds[0]!;
+  if (reportedSnapshotId && !snapshotId.startsWith(reportedSnapshotId) && !reportedSnapshotId.startsWith(snapshotId)) {
+    throw new BackupError('TARGET_RECEIPT_INVALID', 5, `target ${target.id} reported a snapshot identity that differs from repository state`, 'target');
+  }
   const readData = target.verification === 'read-data';
   const check = await execute(target, tools, readData ? ['check', '--read-data'] : ['check'], 60 * 60_000);
   assertPassed(check, 'TARGET_CHECK_FAILED', 6, `target ${target.id} check`);

@@ -66,7 +66,10 @@ if (repo.includes('fail') && operation === 'backup') {
   process.exit(17);
 }
 if (operation === 'backup') process.stdout.write(JSON.stringify({message_type:'summary', snapshot_id:'0123456789abcdef'}) + '\\n');
-if (operation === 'snapshots') process.stdout.write(JSON.stringify([{id:'0123456789abcdef'}]) + '\\n');
+if (operation === 'snapshots') {
+  const tag = args[args.indexOf('--tag') + 1];
+  process.stdout.write(JSON.stringify([{id:'0123456789abcdef',tags:tag ? [tag] : []}]) + '\\n');
+}
 if (operation === 'check') require('node:fs').writeFileSync('${fixtureValue.root}/check-arguments', args.join('\\n'));
 if (operation === 'restore') {
   const output = args[args.indexOf('--target') + 1];
